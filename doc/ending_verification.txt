@@ -7,16 +7,3 @@ Ending 2 Text:
 エンゲル係数高そうな君を
 買い出し部隊パシリ
 に任命する。活躍を期待する。
-
-Analysis:
-Ending 1:
-Part 0: サル以下の (Index 30 in game_strings.txt)
-Part 1: 貴様を
-Part 2: 便所掃除
-Part 3: に任命する。活躍を期待する。
-
-Ending 2:
-Part 0: エンゲル係数高そうな (Index 28 in game_strings.txt)
-Part 1: 君を
-Part 2: 買い出し部隊パシリ
-Part 3: に任命する。活躍を期待する。

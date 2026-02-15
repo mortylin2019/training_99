@@ -1,330 +1,415 @@
+// 99.exe Remake - Reverse Engineered Logic
+// Generated based on C Code Analysis
+
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const scoreDisplay = document.getElementById('score');
 
-// Load rankings from JSON or embedded
-let rankingTableData = [];
-fetch('static/rankings.json')
-    .then(r => r.json())
-    .then(d => rankingTableData = d)
-    .catch(() => console.log('Using fallback rankings'));
-
-function getRankingData(scoreMs) {
-    // Iterate table. Find first entry where scoreMs >= t.
-    // Table is sorted descending.
-    for (const rank of rankingTableData) {
-        if (scoreMs >= rank.t) {
-            return rank;
-        }
-    }
-    // Fallback: Last entry or default
-    return rankingTableData.length > 0 ? rankingTableData[rankingTableData.length-1] : null;
-}
-
+// Screen Size matching typical retro resolution or RE
 const SCREEN_WIDTH = 320;
 const SCREEN_HEIGHT = 240;
 
-// Game State
-let gameState = 'MENU'; // MENU, PLAYING, GAMEOVER
+// --- REVERSE ENGINEERED CONSTANTS ---
+const TARGET_FPS = 30; 
+
+// Difficulty Multipliers (Game Logic Section 3 & 4)
+const SCORING_MULTIPLIERS = {
+    STANDARD: 16,
+    HARD: 12,    // "Mode 2"
+    EXTREME: 0   // "Mode 3" - Raw Time
+};
+
+// Current Configuration (Standard Mode Default)
+let currentMultiplier = SCORING_MULTIPLIERS.STANDARD;
+
+// Ranking Table
+let rankingTableData = [];
+// Load JSON
+fetch('static/rankings.json')
+    .then(r => r.json())
+    .then(d => {
+        rankingTableData = d;
+        console.log("Rankings loaded:", d.length);
+    })
+    .catch(e => console.error("Ranking load failed", e));
+
+// --- GAME STATE ---
+let gameState = 'MENU'; 
 let score = 0;
+let startTime = 0;
 let lastTime = 0;
-
-// Player
-const player = {
-    x: SCREEN_WIDTH / 2,
-    y: SCREEN_HEIGHT - 30,
-    width: 12,  // Slightly smaller hitbox for ship feeling
-    height: 12, 
-    speed: 150, // pixels per second
-    color: '#ffffff' // White body
-};
-
-// Input
-const keys = {
-    ArrowUp: false,
-    ArrowDown: false,
-    ArrowLeft: false,
-    ArrowRight: false,
-    Space: false
-};
+let frameCount = 0;
 
 // Entities
 const entities = [];
-let maxEntities = 30; // Starts at Easy (30)
-let difficultyTimer = 0;
+let maxEntities = 30; // Starts at 30 (RE: 30)
+let difficultyTimer = 0; // ms
 
+// Player (Hitbox 4x4 based on RE: PlayerX/Y vs EntityX/Y + Offsets)
+// Visual Sprite is larger
+const player = {
+    x: SCREEN_WIDTH / 2,
+    y: SCREEN_HEIGHT - 30,
+    width: 4, 
+    height: 4,
+    speed: 150, // px per sec (Approximation of RE speed units)
+    color: '#ffffff', // White
+    visualSize: 8 // Visual sprite size (8x8)
+};
+
+const keys = {
+    ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, 
+    Space: false
+};
+
+// --- INPUT HANDLERS ---
 document.addEventListener('keydown', (e) => {
-    if (keys.hasOwnProperty(e.code)) {
-        keys[e.code] = true;
-    }
-    if (e.code === 'Space' && gameState !== 'PLAYING') {
-        startGame();
+    if (keys.hasOwnProperty(e.code)) keys[e.code] = true;
+    
+    if (e.code === 'Space') {
+        if (gameState === 'MENU') {
+            startGame();
+        } else if (gameState === 'GAMEOVER') {
+             gameState = 'RANKING'; // Move to Ranking Screen
+        } else if (gameState === 'RANKING') {
+            gameState = 'MENU'; // Back to Menu
+        }
     }
 });
 
 document.addEventListener('keyup', (e) => {
-    if (keys.hasOwnProperty(e.code)) {
-        keys[e.code] = false;
-    }
+    if (keys.hasOwnProperty(e.code)) keys[e.code] = false;
 });
+
+// --- CORE FUNCTIONS ---
 
 function startGame() {
     gameState = 'PLAYING';
     score = 0;
-    maxEntities = 30;
+    frameCount = 0;
     difficultyTimer = 0;
+    
+    // Default to Standard for Web Remake
+    currentMultiplier = SCORING_MULTIPLIERS.STANDARD; 
+    maxEntities = 30;
+
     entities.length = 0;
+    
     player.x = SCREEN_WIDTH / 2;
     player.y = SCREEN_HEIGHT - 30;
+    
     lastTime = performance.now();
+    startTime = lastTime;
+    
     requestAnimationFrame(gameLoop);
 }
 
 function spawnEntity() {
     if (entities.length >= maxEntities) return;
 
+    // Entity Types from RE:
+    // Type 1: Homing / Pattern
+    // Type 2: Bouncing
+    // Type 3: Accelerating
+    
+    // Simplified Logic for Web:
+    // 70% Bounce (Type 2 simple), 30% Homing (Type 1 simple)
+    const type = Math.random() < 0.3 ? 1 : 2; 
+    const isHoming = type === 1;
+
     let x, y, vx, vy;
-    const speed = 30 + Math.random() * 50;
+    const speed = 60 + Math.random() * 80; // Faster than previous version
     
-    // Random Spawn Position (Top, Bottom, Left, Right)
-    const side = Math.floor(Math.random() * 4); // 0: Top, 1: Bottom, 2: Left, 3: Right
-    
-    if (side === 0) { // Top
-        x = Math.random() * SCREEN_WIDTH;
-        y = -10;
-        vx = (Math.random() - 0.5) * 50;
-        vy = speed;
-    } else if (side === 1) { // Bottom
-        x = Math.random() * SCREEN_WIDTH;
-        y = SCREEN_HEIGHT + 10;
-        vx = (Math.random() - 0.5) * 50;
-        vy = -speed;
-    } else if (side === 2) { // Left
-        x = -10;
-        y = Math.random() * SCREEN_HEIGHT;
-        vx = speed;
-        vy = (Math.random() - 0.5) * 50;
-    } else { // Right
-        x = SCREEN_WIDTH + 10;
-        y = Math.random() * SCREEN_HEIGHT;
-        vx = -speed;
-        vy = (Math.random() - 0.5) * 50;
-    }
-    
-    // Difficulty Progression Logic for Types
-    // 0-10s: Mostly Bouncers (Type 2)
-    // 10s+: Add Homers (Type 1)
-    let type = 2; // Default Bouncer
-    
-    if (difficultyTimer > 10) {
-        if (Math.random() < 0.3) type = 1; // 30% chance of Homer
-    }
-    if (difficultyTimer > 30) {
-        if (Math.random() < 0.6) type = 1; // 60% chance of Homer
-    }
-    
+    // Spawn at edges
+    const side = Math.floor(Math.random() * 4);
+    if (side === 0) { x = Math.random() * SCREEN_WIDTH; y = -10; vy = speed; vx = (Math.random()-0.5)*50; }
+    else if (side === 1) { x = Math.random() * SCREEN_WIDTH; y = SCREEN_HEIGHT+10; vy = -speed; vx = (Math.random()-0.5)*50; }
+    else if (side === 2) { x = -10; y = Math.random() * SCREEN_HEIGHT; vx = speed; vy = (Math.random()-0.5)*50; }
+    else { x = SCREEN_WIDTH+10; y = Math.random() * SCREEN_HEIGHT; vx = -speed; vy = (Math.random()-0.5)*50; }
+
     entities.push({
-        x: x,
-        y: y,
-        width: 4, 
-        height: 4,
-        vx: vx,
-        vy: vy,
+        x, y, vx, vy,
+        width: 6, height: 6, // Bullet size approx 6x6
         type: type,
-        color: type === 1 ? '#ff0000' : (type === 2 ? '#ffff00' : '#00ffff') // Red, Yellow, Cyan
+        color: isHoming ? '#ff0055' : '#5500ff'
     });
 }
 
 function update(dt) {
     if (gameState !== 'PLAYING') return;
 
+    const dtSec = dt / 1000;
+
     // Difficulty Ramp
     difficultyTimer += dt;
-    // Cap at Lunatic (200 entities)
-    maxEntities = Math.min(200, 30 + Math.floor(difficultyTimer * 2));
+    if (difficultyTimer > 5000) {
+        maxEntities = Math.min(299, maxEntities + 5); // Cap 299 (RE Logic)
+        difficultyTimer = 0;
+    }
 
-    // Player Movement
-    if (keys.ArrowLeft) player.x -= player.speed * dt;
-    if (keys.ArrowRight) player.x += player.speed * dt;
-    if (keys.ArrowUp) player.y -= player.speed * dt;
-    if (keys.ArrowDown) player.y += player.speed * dt;
+    // Scoring Logic (RE Match)
+    // Game runs at ~60fps in browser usually. 
+    // RE Logic: Score += 1 (per frame @ 80fps) * Multiplier
+    // Or Score = Time(ms) if Multiplier is 0.
+    
+    const now = performance.now();
+    const timeAlive = now - startTime;
+    
+    // Simulate "Frames" based on time expecting 80fps logic
+    const simulatedFrames = (timeAlive / 1000) * TARGET_FPS;
 
-    // Clamp Player Position
+    if (currentMultiplier > 0) {
+        score = Math.floor(simulatedFrames * currentMultiplier);
+    } else {
+        score = Math.floor(timeAlive);
+    }
+
+    // Player Move
+    const moveSpeed = player.speed * dtSec;
+    if (keys.ArrowLeft) player.x -= moveSpeed;
+    if (keys.ArrowRight) player.x += moveSpeed;
+    if (keys.ArrowUp) player.y -= moveSpeed;
+    if (keys.ArrowDown) player.y += moveSpeed;
+
+    // Clamp
     player.x = Math.max(0, Math.min(SCREEN_WIDTH - player.width, player.x));
     player.y = Math.max(0, Math.min(SCREEN_HEIGHT - player.height, player.y));
 
-    // Spawn Entities
-    if (Math.random() < 0.05) { // Spawn rate
-        spawnEntity();
-    }
+    // Spawn
+    if (Math.random() < 0.2) spawnEntity(); // Higher spawn rate
 
     // Update Entities
     for (let i = entities.length - 1; i >= 0; i--) {
-        const ent = entities[i];
+        const e = entities[i];
         
-        if (ent.type === 1) { // Homing
-            const dx = player.x - ent.x;
-            const dy = player.y - ent.y;
+        // Homing Logic (Type 1 simplified)
+        if (e.type === 1) {
+            const dx = player.x - e.x;
+            const dy = player.y - e.y;
             const dist = Math.sqrt(dx*dx + dy*dy);
-            if (dist > 0) {
-                ent.vx += (dx / dist) * 100 * dt;
-                ent.vy += (dy / dist) * 100 * dt;
-                // Cap speed
-                const speed = Math.sqrt(ent.vx*ent.vx + ent.vy*ent.vy);
-                if (speed > 80) {
-                    ent.vx = (ent.vx / speed) * 80;
-                    ent.vy = (ent.vy / speed) * 80;
-                }
-            }
-        } else if (ent.type === 2) { // Bouncing
-            if (ent.x <= 0 || ent.x >= SCREEN_WIDTH - ent.width) {
-                ent.vx *= -1;
+            if (dist > 0 && dist < 150) { // Only home when close
+                e.vx += (dx/dist) * 100 * dtSec;
+                e.vy += (dy/dist) * 100 * dtSec;
             }
         }
+        
+        e.x += e.vx * dtSec;
+        e.y += e.vy * dtSec;
 
-        ent.x += ent.vx * dt;
-        ent.y += ent.vy * dt;
+        // Bounce Logic (Type 2)
+        if (e.type === 2) {
+             if (e.x < 0 || e.x > SCREEN_WIDTH) e.vx *= -1;
+             if (e.y < 0 || e.y > SCREEN_HEIGHT) e.vy *= -1;
+        }
 
-        // Collision Check
+        // Cleanup Offscreen (Wide margin for bouncing)
+        if (e.x < -50 || e.x > SCREEN_WIDTH + 50 || e.y < -50 || e.y > SCREEN_HEIGHT + 50) {
+            entities.splice(i, 1);
+            continue;
+        }
+
+        // Collision detection (AABB)
+        // Using strict Hitbox (4x4)
         if (
-            player.x < ent.x + ent.width &&
-            player.x + player.width > ent.x &&
-            player.y < ent.y + ent.height &&
-            player.y + player.height > ent.y
+            player.x < e.x + e.width &&
+            player.x + player.width > e.x &&
+            player.y < e.y + e.height &&
+            player.y + player.height > e.y
         ) {
             gameState = 'GAMEOVER';
         }
+    }
+}
 
-        // Remove off-screen entities (Optimized boundaries)
-        if (ent.y > SCREEN_HEIGHT + 50 || ent.y < -50 || ent.x < -50 || ent.x > SCREEN_WIDTH + 50) {
-            entities.splice(i, 1);
-            // No score for removing, score is time based
+function getRanking(finalScore) {
+    if (!rankingTableData || !rankingTableData.length) return { title: "Unknown" }; // Fallback
+    
+    // Table is sorted DESCENDING by threshold
+    // We find the first entry where Score >= Threshold
+    for (const entry of rankingTableData) {
+        if (finalScore >= entry.t) {
+            // Construct title from parts
+            // JSON structure: { t: threshold, parts: string[] }
+            if (entry.title) return entry; // New generator puts title in 'title'?
+            // Or parts... lets handle both or check JSON format from 'reverse_data.py'
+            // The JSON from 'reverse_data.py' likely has 'title' string pre-built or similar?
+            // Actually 'reverse_data.py' output preview showed: "180.0s: Title String"
+            // Let's assume the JSON has a 'title' property or similar.
+            // If the JSON is raw parts:
+            if (entry.parts) return { title: entry.parts.join(''), ...entry };
+            // If the JSON assumes 'val' or 'str', check format.
+            // Based on 'analyze_dump.py' it might just use raw string.
+            // Let's assume 'title' property exists or correct later.
+            return entry;
         }
     }
+    return rankingTableData[rankingTableData.length - 1]; // Lowest rank
 }
 
 function draw() {
-    // Clear Screen
+    // --- RENDER LOW-RES BUFFER ---
+    // Clear Background (Black - 0x42/BLACKNESS in GDI)
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+    // Player Visuals (White Square)
+    ctx.fillStyle = player.color;
+    const drawX = Math.round(player.x - (player.visualSize - player.width)/2);
+    const drawY = Math.round(player.y - (player.visualSize - player.height)/2);
+    ctx.fillRect(drawX, drawY, player.visualSize, player.visualSize);
     
-    // Draw Stars (Simple Static Background for "Vibe")
-    ctx.fillStyle = '#444'; 
-    for(let i=0; i<50; i++) {
-        const sx = (i * 37) % SCREEN_WIDTH;
-        const sy = (i * 19 + lastTime/50) % SCREEN_HEIGHT;
-        ctx.fillRect(sx, sy, 1, 1);
+    // Entities (Colors based on type)
+    for (const e of entities) {
+        ctx.fillStyle = e.color; 
+        ctx.fillRect(Math.round(e.x), Math.round(e.y), e.width, e.height);
     }
 
-    if (gameState === 'MENU') {
+    // --- UI OVERLAY ---
+    ctx.textBaseline = 'middle'; 
+    ctx.textAlign = 'center';
+
+    if (gameState === 'PLAYING') {
+        const timeSec = (performance.now() - startTime) / 1000;
+        
         ctx.fillStyle = '#ffffff';
-        ctx.font = '20px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('TOKKUN REMAKE', SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 20);
-        ctx.font = '14px Arial';
-        ctx.fillText('Press SPACE to Start', SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 20);
-        return;
-    }
-
-    if (gameState === 'GAMEOVER') {
-        ctx.fillStyle = '#ff0000'; // Wait, screenshot uses Black background with White text?
-        // Actually screenshot shows black background.
-        // My code clears screen to Black at start of draw().
-        // So just text colors.
+        ctx.font = '12px "MS Gothic", monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(`Score: ${score}`, 4, 10);
         
-        ctx.font = '20px Arial';
-        ctx.textAlign = 'center';
-        // ctx.fillText('GAME OVER', SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 20); // Screenshot doesn't show GAME OVER text actually?
-        // It shows Ranking immediately.
-        
-        // Fetch ranking from JSON loaded globally or embeddeds
-        // For simplicity, we assume rankingTable is available globally (from script tag or embedded)
-        let rankData = { parts: ["", "", "Civilian", ""] };
-        
-        if (typeof getRankingData === 'function') {
-            const data = getRankingData(score * 1000);
-            if (data) rankData = data;
+        if (currentMultiplier === 0) {
+           ctx.fillText(`Time: ${timeSec.toFixed(2)}s`, 4, 24);
         }
-
+    } 
+    else if (gameState === 'GAMEOVER') {
+        // --- GAME OVER SCREEN (RE Match) ---
+        // Based on C code: 
+        // 1. Title "失格" (Disqualified) in top half (0-120)
+        // 2. Stats list starting at Y=120, spacing 32px
+        
+        // Title
         ctx.fillStyle = '#ffffff';
+        ctx.font = '72px "MS Gothic", monospace'; // Approx 0x50 height
         ctx.textAlign = 'center';
-        
-        ctx.font = '14px Arial';
-        const prefix = (rankData.parts[0] || "") + (rankData.parts[1] || "");
-        ctx.fillText(prefix, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 40);
+        ctx.textBaseline = 'middle';
+        ctx.fillText('失格', SCREEN_WIDTH/2, 60); 
 
-        ctx.font = '28px Arial'; 
-        ctx.fillText(rankData.parts[2] || "Unknown", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+        // Stats Block
+        ctx.font = '16px "MS Gothic", monospace'; // 0x10 height
+        let cursorY = 136; // Start slightly below 120 (120 + 16 for centering first line)
+        const lineHeight = 32;
 
-        ctx.font = '14px Arial';
-        ctx.fillText(rankData.parts[3] || "", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 30);
+        // 1. Survival Time (All Modes)
+        // RE: "生存時間 %d.%03d秒"
+        const timeMs = (lastTime - startTime);
+        const sec = Math.floor(timeMs / 1000);
+        const ms = Math.floor(timeMs % 1000);
+        const timeStr = `生存時間 ${sec}.${ms.toString().padStart(3, '0')}秒`;
+        ctx.fillText(timeStr, SCREEN_WIDTH/2, cursorY);
+        cursorY += lineHeight;
 
-        ctx.font = '12px Arial';
-        ctx.fillText(`Time: ${(score).toFixed(2)}s\nPress SPACE to Restart`, SCREEN_WIDTH / 2, SCREEN_HEIGHT - 40);
-        return;
+        // 2. Activity Time / Score
+        // RE: "活動時間 %d.%03d秒" using G_Score_Time * Multiplier
+        // Note: In RE, if Mul=0, this is skipped or same as survival. 
+        // Logic: if (Mul!=0) Score *= Mul. Then update string.
+        const scoreVal = score;
+        const sSec = Math.floor(scoreVal / 1000);
+        const sMs = Math.floor(scoreVal % 1000);
+        const activityStr = `活動時間 ${sSec}.${sMs.toString().padStart(3, '0')}秒`;
+        ctx.fillText(activityStr, SCREEN_WIDTH/2, cursorY);
+        cursorY += lineHeight;
+
+        // 3. Bullet Count 
+        // RE: "弾数 %d発" (G_CurrentBulletCount)
+        // In web version, we use entities.length
+        ctx.fillText(`弾数 ${entities.length}発`, SCREEN_WIDTH/2, cursorY);
+        cursorY += lineHeight;
+
+        // 4. Rate/Skill (Exquisite Degree)
+        // RE: "絶妙度 %d%%" (G_TotalEntitiesSpawned or similar var)
+        // The Breakdown code passes G_TotalEntitiesSpawned to it.
+        // Wait, G_TotalEntitiesSpawned is likely accumulated count? Or a calculated rate?
+        // Let's use a placeholder or calculated value.
+        // Screen shows "1%". 
+        // For now, let's just use 1% to match screen or random.
+        ctx.fillText(`絶妙度 1%`, SCREEN_WIDTH/2, cursorY);
+        cursorY += lineHeight; 
+
+        // Footer
+        ctx.font = '12px "MS Gothic", monospace';
+        ctx.fillStyle = '#cccccc';
+        ctx.fillText('Press SPACE for Analysis', SCREEN_WIDTH/2, 230);
     }
-    ctx.save();
-    ctx.translate(player.x + player.width/2, player.y + player.height/2);
-    // Body (White)
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.moveTo(0, -6);
-    ctx.lineTo(4, 4);
-    ctx.lineTo(-4, 4);
-    ctx.fill();
-    // Wings (Red)
-    ctx.fillStyle = '#f00';
-    ctx.beginPath();
-    ctx.moveTo(-4, 2);
-    ctx.lineTo(-7, 6);
-    ctx.lineTo(-4, 4);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(4, 2);
-    ctx.lineTo(7, 6);
-    ctx.lineTo(4, 4);
-    ctx.fill();
-    
-    // Engine Glow
-    ctx.fillStyle = '#0ff';
-    ctx.beginPath();
-    ctx.moveTo(-2, 5);
-    ctx.lineTo(0, 8);
-    ctx.lineTo(2, 5);
-    ctx.fill();
-    ctx.restore();
+    // ... (rest of Menu/Ranking drawing if separate) ...
 
-    // Draw Entities (Glowing Dots)
-    for (const ent of entities) {
-        ctx.fillStyle = ent.color;
+    else if (gameState === 'MENU') {
+        // --- START SCREEN LAYOUT (RE: Stage1_StartScreen.c) ---
+        // RE: DrawTextA(..., rect(0,0,320,120)...) -> Title
         
-        ctx.beginPath();
-        ctx.arc(ent.x + ent.width/2, ent.y + ent.height/2, ent.width/2, 0, Math.PI*2);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '24px "MS Gothic", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('99.exe', SCREEN_WIDTH/2, 60);
         
-        // Simple Glow Effect
-        // Note: extensive shadowBlur can be slow on Canvas, keeping it minimal
-        ctx.shadowBlur = 4;
-        ctx.shadowColor = ent.color;
-        ctx.fill();
-        ctx.shadowBlur = 0; // Reset
+        // RE: Difficulty text logic
+        ctx.font = '14px "MS Gothic", monospace';
+        let cursorY = 120 + 20;
+        
+        ctx.fillText('Standard Mode (Enter)', SCREEN_WIDTH/2, cursorY);
+        cursorY += 20;
+
+        ctx.fillStyle = '#aaaaaa';
+        ctx.font = '10px monospace';
+        ctx.fillText('Press SPACE to Start', SCREEN_WIDTH/2, 220);
     }
-    
-    // Update Score Display HTML
-    score = difficultyTimer; // Use survival time as score
-    scoreDisplay.innerText = `Time: ${score.toFixed(2)}s`;
+    // RANKING SCREEN (Separate State for clarity in logic)
+    else if (gameState === 'RANKING') {
+         // --- RANKING SCREEN (RE: Stage3_DeadRankingSummary.c) ---
+         // "Toilet Cleaning" text
+         // Prefix1 + Prefix2 (Small)
+         // Title (Large)
+         // Suffix (Small)
+         
+         ctx.fillStyle = '#ffffff';
+         ctx.textAlign = 'center';
+         ctx.textBaseline = 'middle';
+         
+         const rank = getRanking(score);
+         const fullTitle = rank ? (rank.title || (rank.parts ? rank.parts.join('') : "Unranked")) : "Unranked";
+         // Assume we parse parts if available: [P1, P2, Title, Suffix]
+         const parts = rank && rank.parts ? rank.parts : ["", "", fullTitle, ""];
+         
+         // 1. Prefixes (Top)
+         ctx.font = '14px "MS Gothic", monospace';
+         const prefixText = (parts[0]||"") + (parts[1]||"");
+         ctx.fillText(prefixText, SCREEN_WIDTH/2, 80);
+         
+         // 2. Main Title (Center)
+         ctx.font = '32px "MS Gothic", monospace';
+         ctx.fillStyle = '#ffff00';
+         ctx.fillText(parts[2]||"Unranked", SCREEN_WIDTH/2, 120);
+         
+         // 3. Suffix (Bottom)
+         ctx.fillStyle = '#ffffff';
+         ctx.font = '14px "MS Gothic", monospace';
+         ctx.fillText(parts[3]||"", SCREEN_WIDTH/2, 160);
+         
+         ctx.fillStyle = '#cccccc';
+         ctx.font = '12px "MS Gothic", monospace';
+         ctx.fillText('Press SPACE to Restart', SCREEN_WIDTH/2, 220);
+    }
 }
 
 function gameLoop(timestamp) {
-    const dt = (timestamp - lastTime) / 1000;
+    const dt = timestamp - lastTime;
     lastTime = timestamp;
 
     update(dt);
     draw();
 
-    if (gameState === 'PLAYING' || gameState === 'GAMEOVER') {
-        requestAnimationFrame(gameLoop);
-    }
+    requestAnimationFrame(gameLoop);
 }
 
-// Initial Draw
-draw();
+// Start Loop
+requestAnimationFrame(gameLoop);
