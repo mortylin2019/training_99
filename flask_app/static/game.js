@@ -2,7 +2,12 @@
 // Generated based on C Code Analysis
 
 const canvas = document.getElementById('gameCanvas');
+if (!canvas) {
+    console.error("Canvas element not found!");
+    alert("Canvas element not found!");
+}
 const ctx = canvas.getContext('2d');
+console.log("Game script started. Context acquired.");
 const scoreDisplay = document.getElementById('score');
 
 // Screen Size matching typical retro resolution or RE
@@ -25,7 +30,7 @@ let currentMultiplier = SCORING_MULTIPLIERS.STANDARD;
 // Ranking Table
 let rankingTableData = [];
 // Load JSON
-fetch('static/rankings.json')
+fetch('/static/rankings.json') // Use absolute path just in case
     .then(r => r.json())
     .then(d => {
         rankingTableData = d;
@@ -44,6 +49,7 @@ let frameCount = 0;
 const entities = [];
 let maxEntities = 30; // Starts at 30 (RE: 30)
 let difficultyTimer = 0; // ms
+let riskScore = 0; // "Exquisite Degree" / Graze Counter
 
 // Player (Hitbox 4x4 based on RE: PlayerX/Y vs EntityX/Y + Offsets)
 // Visual Sprite is larger
@@ -87,6 +93,7 @@ function startGame() {
     gameState = 'PLAYING';
     score = 0;
     frameCount = 0;
+    riskScore = 0;
     difficultyTimer = 0;
     
     // Default to Standard for Web Remake
@@ -197,18 +204,43 @@ function update(dt) {
         e.y += e.vy * dtSec;
 
         // Bounce Logic (Type 2)
+        // FIX: Only bounce if moving OUT of bounds.
+        // Prevents newly spawned off-screen entities from immediately reversing away.
         if (e.type === 2) {
-             if (e.x < 0 || e.x > SCREEN_WIDTH) e.vx *= -1;
-             if (e.y < 0 || e.y > SCREEN_HEIGHT) e.vy *= -1;
+             if ((e.x < 0 && e.vx < 0) || (e.x > SCREEN_WIDTH && e.vx > 0)) e.vx *= -1;
+             if ((e.y < 0 && e.vy < 0) || (e.y > SCREEN_HEIGHT && e.vy > 0)) e.vy *= -1;
         }
 
-        // Cleanup Offscreen (Wide margin for bouncing)
-        if (e.x < -50 || e.x > SCREEN_WIDTH + 50 || e.y < -50 || e.y > SCREEN_HEIGHT + 50) {
+        // RE Logic: Entities that leave boundary are NOT immediately killed if they are bouncing type
+        // However, for simplicity and performance in web, we kill them if they go too far.
+        // The user noted: "entities exited the boundary still alive" -> This implies they should persist longer or bounce back.
+        // We increased the margin to 200px to allow off-screen movement logic (like homing turning back).
+        if (e.x < -200 || e.x > SCREEN_WIDTH + 200 || e.y < -200 || e.y > SCREEN_HEIGHT + 200) {
             entities.splice(i, 1);
             continue;
         }
 
         // Collision detection (AABB)
+        // Using strict Hitbox (4x4)
+        // Also calculate "Graze" / "Risk" (Exquisite Degree)
+        // RE Logic: G_TotalEntitiesSpawned increments when bullets LEAVE proximity.
+        // We simulate this by checking distance.
+        const dx = (player.x + player.width/2) - (e.x + e.width/2);
+        const dy = (player.y + player.height/2) - (e.y + e.height/2);
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        
+        // Grazing logic
+        const grazeThreshold = 40; // Pixel radius for graze
+        if (dist < grazeThreshold) {
+            e.isGrazing = true;
+        } else {
+            if (e.isGrazing) {
+                // Bullet was grazing, now it left proximity -> Increment Risk
+                riskScore++;
+                e.isGrazing = false;
+            }
+        }
+
         // Using strict Hitbox (4x4)
         if (
             player.x < e.x + e.width &&
@@ -246,7 +278,7 @@ function getRanking(finalScore) {
     return rankingTableData[rankingTableData.length - 1]; // Lowest rank
 }
 
-function draw() {
+function draw(dt) {
     // --- RENDER LOW-RES BUFFER ---
     // Clear Background (Black - 0x42/BLACKNESS in GDI)
     ctx.fillStyle = '#000000';
@@ -280,6 +312,14 @@ function draw() {
         if (currentMultiplier === 0) {
            ctx.fillText(`Time: ${timeSec.toFixed(2)}s`, 4, 24);
         }
+
+        // --- DEBUG STATS ---
+        ctx.fillStyle = '#aaaaaa';
+        ctx.font = '10px monospace';
+        ctx.fillText(`Entities: ${entities.length} / ${maxEntities}`, 4, 40);
+        ctx.fillText(`Risk/Graze: ${riskScore} (Exquisite Degree)`, 4, 52);
+        ctx.fillText(`FPS: ${(1000/dt).toFixed(1)}`, 4, 64);
+        // ------------------
     } 
     else if (gameState === 'GAMEOVER') {
         // --- GAME OVER SCREEN (RE Match) ---
@@ -309,9 +349,7 @@ function draw() {
         cursorY += lineHeight;
 
         // 2. Activity Time / Score
-        // RE: "活動時間 %d.%03d秒" using G_Score_Time * Multiplier
-        // Note: In RE, if Mul=0, this is skipped or same as survival. 
-        // Logic: if (Mul!=0) Score *= Mul. Then update string.
+        // RE: "活動時間 %d.%03d秒"
         const scoreVal = score;
         const sSec = Math.floor(scoreVal / 1000);
         const sMs = Math.floor(scoreVal % 1000);
@@ -320,19 +358,13 @@ function draw() {
         cursorY += lineHeight;
 
         // 3. Bullet Count 
-        // RE: "弾数 %d発" (G_CurrentBulletCount)
-        // In web version, we use entities.length
+        // RE: "弾数 %d発"
         ctx.fillText(`弾数 ${entities.length}発`, SCREEN_WIDTH/2, cursorY);
         cursorY += lineHeight;
 
         // 4. Rate/Skill (Exquisite Degree)
-        // RE: "絶妙度 %d%%" (G_TotalEntitiesSpawned or similar var)
-        // The Breakdown code passes G_TotalEntitiesSpawned to it.
-        // Wait, G_TotalEntitiesSpawned is likely accumulated count? Or a calculated rate?
-        // Let's use a placeholder or calculated value.
-        // Screen shows "1%". 
-        // For now, let's just use 1% to match screen or random.
-        ctx.fillText(`絶妙度 1%`, SCREEN_WIDTH/2, cursorY);
+        // RE: "絶妙度 %d%%"
+        ctx.fillText(`絶妙度 ${riskScore}%`, SCREEN_WIDTH/2, cursorY);
         cursorY += lineHeight; 
 
         // Footer
@@ -340,57 +372,49 @@ function draw() {
         ctx.fillStyle = '#cccccc';
         ctx.fillText('Press SPACE for Analysis', SCREEN_WIDTH/2, 230);
     }
-    // ... (rest of Menu/Ranking drawing if separate) ...
 
     else if (gameState === 'MENU') {
         // --- START SCREEN LAYOUT (RE: Stage1_StartScreen.c) ---
-        // RE: DrawTextA(..., rect(0,0,320,120)...) -> Title
-        
+        // Title
         ctx.fillStyle = '#ffffff';
         ctx.font = '24px "MS Gothic", monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('99.exe', SCREEN_WIDTH/2, 60);
         
-        // RE: Difficulty text logic
+        // 0x405d15: "Enterで特訓開始" (Start Training with Enter)
         ctx.font = '14px "MS Gothic", monospace';
         let cursorY = 120 + 20;
         
-        ctx.fillText('Standard Mode (Enter)', SCREEN_WIDTH/2, cursorY);
+        ctx.fillText('Enterで特訓開始', SCREEN_WIDTH/2, cursorY);
         cursorY += 20;
 
         ctx.fillStyle = '#aaaaaa';
         ctx.font = '10px monospace';
-        ctx.fillText('Press SPACE to Start', SCREEN_WIDTH/2, 220);
+        ctx.fillText('(Press SPACE or ENTER)', SCREEN_WIDTH/2, 220);
     }
-    // RANKING SCREEN (Separate State for clarity in logic)
     else if (gameState === 'RANKING') {
          // --- RANKING SCREEN (RE: Stage3_DeadRankingSummary.c) ---
-         // "Toilet Cleaning" text
-         // Prefix1 + Prefix2 (Small)
-         // Title (Large)
-         // Suffix (Small)
+         // Structure: Prefix1 + Prefix2 (Small), Title (Large), Suffix (Small)
          
          ctx.fillStyle = '#ffffff';
          ctx.textAlign = 'center';
          ctx.textBaseline = 'middle';
          
          const rank = getRanking(score);
-         const fullTitle = rank ? (rank.title || (rank.parts ? rank.parts.join('') : "Unranked")) : "Unranked";
-         // Assume we parse parts if available: [P1, P2, Title, Suffix]
-         const parts = rank && rank.parts ? rank.parts : ["", "", fullTitle, ""];
+         const parts = rank && rank.parts ? rank.parts : ["", "", "Unranked", ""];
          
-         // 1. Prefixes (Top)
+         // 1. Prefixes (Top) - Index 0 + 1
          ctx.font = '14px "MS Gothic", monospace';
          const prefixText = (parts[0]||"") + (parts[1]||"");
          ctx.fillText(prefixText, SCREEN_WIDTH/2, 80);
          
-         // 2. Main Title (Center)
+         // 2. Main Title (Center) - Index 2
          ctx.font = '32px "MS Gothic", monospace';
          ctx.fillStyle = '#ffff00';
          ctx.fillText(parts[2]||"Unranked", SCREEN_WIDTH/2, 120);
          
-         // 3. Suffix (Bottom)
+         // 3. Suffix (Bottom) - Index 3
          ctx.fillStyle = '#ffffff';
          ctx.font = '14px "MS Gothic", monospace';
          ctx.fillText(parts[3]||"", SCREEN_WIDTH/2, 160);
@@ -402,13 +426,20 @@ function draw() {
 }
 
 function gameLoop(timestamp) {
-    const dt = timestamp - lastTime;
-    lastTime = timestamp;
+    try {
+        const dt = timestamp - lastTime;
+        lastTime = timestamp;
 
-    update(dt);
-    draw();
+        update(dt);
+        draw(dt);
 
-    requestAnimationFrame(gameLoop);
+        requestAnimationFrame(gameLoop);
+    } catch (e) {
+        console.error(e);
+        ctx.fillStyle = "red";
+        ctx.font = "20px monospace";
+        ctx.fillText("ERROR: " + e.message, 10, 50);
+    }
 }
 
 // Start Loop
