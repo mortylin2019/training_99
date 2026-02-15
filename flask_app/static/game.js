@@ -2,68 +2,23 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const scoreDisplay = document.getElementById('score');
 
-// Extracted from binary DAT_004067a3
-const rankingTable = [
-    { t: 180000, title: "愛の人勢いのある" },
-    { t: 175000, title: "愛の人勢いのある" },
-    { t: 170000, title: "奇跡の人勢いのある" },
-    { t: 165000, title: "ナマモノ勢いのある" },
-    { t: 160000, title: "ナマモノ勢いのある" },
-    { t: 157000, title: "と認定する。" },
-    { t: 155000, title: "クダモノ勢いのある" },
-    { t: 150000, title: "アレ勢いのある" },
-    { t: 145000, title: "ケダモノ以上。" },
-    { t: 140000, title: "ケダモノ以上。" },
-    { t: 135000, title: "paranoia以上。" },
-    { t: 130000, title: "究極超人以上。" },
-    { t: 125000, title: "究極超人愛の狩人" },
-    { t: 120000, title: "バケモノ勢いのある" },
-    { t: 115000, title: "変態以上。" }, 
-    { t: 110000, title: "変態以上。" }, 
-    { t: 105000, title: "嵐を呼ぶ男以上。" },
-    { t: 100000, title: "達人以上。" },
-    { t: 95000, title: "ナイスガイと認定する。" },
-    { t: 90000, title: "マシィーンと認定する。" },
-    { t: 85000, title: "マシィーンと認定する。" },
-    { t: 80000, title: "ファーストチルドレンと認定する。" },
-    { t: 75000, title: "ファーストチルドレンと認定する。" },
-    { t: 70000, title: "兄貴と認定する。" },
-    { t: 65000, title: "スプリガン" }, 
-    { t: 60000, title: "スプリガン" },
-    { t: 55000, title: "ダンスマニア何やってんだ" },
-    { t: 53000, title: "いくさ人と呼ばせてください。" },
-    { t: 50000, title: "もののふと認定する。" },
-    { t: 47000, title: "つはものと認定する。" }, 
-    { t: 45000, title: "つはものと認定する。" },
-    { t: 44000, title: "Aチームと認定する。" },
-    { t: 40000, title: "逃亡者と認定する。" },
-    { t: 37000, title: "逃亡者と認定する。" },
-    { t: 35000, title: "ミト王子と認定する。" },
-    { t: 34000, title: "部長と認定する。" },
-    { t: 30000, title: "課長と呼ばせていただく。" },
-    { t: 27000, title: "係長に任命する。闘って死ね。" },
-    { t: 25000, title: "主任と認定する。" },
-    { t: 20000, title: "壁と認定する。" },
-    { t: 17000, title: "お調子者と認定する。" },
-    { t: 15000, title: "弾拾いと認定する。" },
-    { t: 14000, title: "買い出し部隊パシリと認定する。" },
-    { t: 13000, title: "レーザーのレンズ磨きと認定する。" },
-    { t: 12000, title: "使い捨ての駒と認定する。" },
-    { t: 10000, title: "サル見習いと認定する。" },
-    { t: 8000, title: "便所掃除と認定する。" },
-    { t: 5000, title: "君をと認定する。" },
-    { t: 3000, title: "貴様をと認定する。" },
-    { t: 1000, title: "あなたはと認定する。" },
-    { t: 500, title: "敵前逃亡する" }
-];
+// Load rankings from JSON or embedded
+let rankingTableData = [];
+fetch('static/rankings.json')
+    .then(r => r.json())
+    .then(d => rankingTableData = d)
+    .catch(() => console.log('Using fallback rankings'));
 
-function getRanking(scoreMs) {
-    for (const rank of rankingTable) {
+function getRankingData(scoreMs) {
+    // Iterate table. Find first entry where scoreMs >= t.
+    // Table is sorted descending.
+    for (const rank of rankingTableData) {
         if (scoreMs >= rank.t) {
-            return rank.title;
+            return rank;
         }
     }
-    return "敵前逃亡する";
+    // Fallback: Last entry or default
+    return rankingTableData.length > 0 ? rankingTableData[rankingTableData.length-1] : null;
 }
 
 const SCREEN_WIDTH = 320;
@@ -272,29 +227,42 @@ function draw() {
     }
 
     if (gameState === 'GAMEOVER') {
-        ctx.fillStyle = '#ff0000';
+        ctx.fillStyle = '#ff0000'; // Wait, screenshot uses Black background with White text?
+        // Actually screenshot shows black background.
+        // My code clears screen to Black at start of draw().
+        // So just text colors.
+        
         ctx.font = '20px Arial';
         ctx.textAlign = 'center';
-        ctx.fillText('GAME OVER', SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 20);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '14px Arial';
+        // ctx.fillText('GAME OVER', SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 20); // Screenshot doesn't show GAME OVER text actually?
+        // It shows Ranking immediately.
         
-        // Rank / Rating based on time (score)
-        let rank = "Unknown";
-        if (typeof getRanking === 'function') {
-            rank = getRanking(score * 1000);
-        } else {
-             if (score > 10) rank = "Trainee";
-             if (score > 30) rank = "Soldier"; 
+        // Fetch ranking from JSON loaded globally or embeddeds
+        // For simplicity, we assume rankingTable is available globally (from script tag or embedded)
+        let rankData = { parts: ["", "", "Civilian", ""] };
+        
+        if (typeof getRankingData === 'function') {
+            const data = getRankingData(score * 1000);
+            if (data) rankData = data;
         }
 
-        ctx.fillText(`Time: ${(score).toFixed(2)}s`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 10);
-        ctx.fillText(`${rank}`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 30);
-        ctx.fillText('Press SPACE to Restart', SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 60);
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        
+        ctx.font = '14px Arial';
+        const prefix = (rankData.parts[0] || "") + (rankData.parts[1] || "");
+        ctx.fillText(prefix, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 40);
+
+        ctx.font = '28px Arial'; 
+        ctx.fillText(rankData.parts[2] || "Unknown", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+
+        ctx.font = '14px Arial';
+        ctx.fillText(rankData.parts[3] || "", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 30);
+
+        ctx.font = '12px Arial';
+        ctx.fillText(`Time: ${(score).toFixed(2)}s\nPress SPACE to Restart`, SCREEN_WIDTH / 2, SCREEN_HEIGHT - 40);
         return;
     }
-
-    // Draw Player (Ship Style)
     ctx.save();
     ctx.translate(player.x + player.width/2, player.y + player.height/2);
     // Body (White)

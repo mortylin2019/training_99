@@ -85,40 +85,48 @@ def solve():
         # XOR Decrypt
         decrypted = bytes([b ^ 0xFF for b in entry_bytes])
         
-        # Unpack
+        # Unpack: Threshold(4), ID1(1), ID2(1), ID3(1), ID4(1)
         threshold = struct.unpack('<I', decrypted[0:4])[0]
-        id_main = decrypted[6] # Byte 6 is Title
-        id_suffix = decrypted[7] # Byte 7 is Suffix
-        
-        if threshold == 0 and pos > 0 and threshold < 500:
-             # Likely End of Table (or the lowest rank "0.5s" case).
-             # We continue if it looks valid
-             pass
+        id1 = decrypted[4]
+        id2 = decrypted[5]
+        id3 = decrypted[6]
+        id4 = decrypted[7]
         
         # Map to strings
-        title_main = string_table[id_main] if id_main < len(string_table) else ""
-        title_suffix = string_table[id_suffix] if id_suffix < len(string_table) else ""
+        str1 = string_table[id1] if id1 < len(string_table) else ""
+        str2 = string_table[id2] if id2 < len(string_table) else ""
+        str3 = string_table[id3] if id3 < len(string_table) else ""
+        str4 = string_table[id4] if id4 < len(string_table) else ""
         
-        full_title = f"{title_main}{title_suffix}"
+        # In Game Logic (FUN_00404050):
+        # It seems ID1 and ID2 are prefix parts (not always drawn?)
+        # ID3 is the Main Title (Big Font)
+        # ID4 is the Suffix (Bottom)
+        
+        full_title = f"{str1}{str2}{str3}{str4}"
         
         # Simple heuristic to stop reading garbage at end of file
-        if threshold > 300000 and len(rankings) > 0:
-            break
+        # Modified: Don't break, just log. 
+        # The table might have entries out of order or special values.
+        if threshold > 2000000000: # Just sanity check for insane integer
+             pass
             
         rankings.append({
             "t": threshold,
-            "title": full_title
+            "title": full_title,
+            "parts": [str1, str2, str3, str4]
         })
         
         # Loop limit safety
-        if pos > 2000: break
+        if pos > 4000: break # Increased limit
         pos += 8
         
     print(f"[+] Table extracted ({len(rankings)} entries).")
     
     # 4. Filter and Save
-    # Remove obvious garbage (very high thresholds)
-    valid_rankings = [r for r in rankings if r['t'] <= 300000]
+    # Remove obvious garbage
+    # Relaxed filter to see if we were missing valid high/low entries
+    valid_rankings = [r for r in rankings if r['t'] <= 3600000] # Allow up to an hour?
     
     # Save to JSON for Game
     with open(OUTPUT_JSON_PATH, 'w', encoding='utf-8') as f:
@@ -141,5 +149,37 @@ def solve():
     for r in valid_rankings[:5]:
         print(f"{r['t']/1000}s: {r['title']}")
 
-if __name__ == "__main__":
+if __name__ == "__main__": 
+    # The discrepancy (Dump says 29,77,68,81 for 15s; Screenshot says 28,74,68,78)
+    # suggests that IDs shift at runtime or based on difficulty.
+    # But wait, looking at the code:
+    # 29 -> 28 (-1)
+    # 77 -> 74 (-3)
+    # 68 -> 68 (Same)
+    # 81 -> 78 (-3)
+    
+    # ID 77 is "You" (Prefix 2). ID 74 ("You") is also "You".
+    # ID 81 is "Certified as." ID 78 ("Appoint to...") is also a suffix.
+    
+    # Maybe the game CHOOSES between different prefixes/suffixes randomly?
+    # Or based on Difficulty?
+    # Let's check FUN_00404050 again.
+    
+    # It reads IDs from table.
+    # It draws lpString (ID1) if not null.
+    # It draws lpString_01 (ID2) if not null.
+    # It draws lpString_00 (ID3) [Main Title].
+    # It draws lpchText   (ID4) [Suffix].
+    
+    # The IDs in the table seem FIXED (29, 77, 68, 81).
+    # If the screenshot shows DIFFERENT strings for the SAME title (68),
+    # then the table MUST have different values in memory, OR the logic picks differently.
+    
+    # Hypothesis: The provided hex dump is from a version where the table layout is [29, 77, 68, 81].
+    # But maybe the user screenshot is from a play session where RNG modified the table?
+    # No, usually static.
+    
+    # Let's trust the dump we HAVE, but acknowledge the variation.
+    # We will output ALL FOUR strings for the remake to fully match the style causing the "vibe".
+    
     solve()
