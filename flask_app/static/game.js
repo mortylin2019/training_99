@@ -60,8 +60,11 @@ const player = {
     height: 4,
     speed: 150, // px per sec (Approximation of RE speed units)
     color: '#ffffff', // White
-    visualSize: 8 // Visual sprite size (8x8)
+    visualSize: 16 // Visual sprite size (Increase to show icon better, hitbox remains 4x4)
 };
+
+const playerImage = new Image();
+playerImage.src = '/static/player.png';
 
 const keys = {
     ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, 
@@ -284,11 +287,19 @@ function draw(dt) {
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
-    // Player Visuals (White Square)
-    ctx.fillStyle = player.color;
+    // Player Visuals (Icon or White Square fallback)
     const drawX = Math.round(player.x - (player.visualSize - player.width)/2);
     const drawY = Math.round(player.y - (player.visualSize - player.height)/2);
-    ctx.fillRect(drawX, drawY, player.visualSize, player.visualSize);
+    
+    if (playerImage.complete && playerImage.naturalWidth !== 0) {
+        // Draw Icon
+        ctx.drawImage(playerImage, drawX, drawY, player.visualSize, player.visualSize);
+    } else {
+        // Fallback
+        ctx.fillStyle = player.color;
+        ctx.fillRect(drawX, drawY, player.visualSize, player.visualSize);
+    }
+    
     
     // Entities (Colors based on type)
     for (const e of entities) {
