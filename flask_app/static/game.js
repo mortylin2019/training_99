@@ -31,7 +31,8 @@ const keys = {
 
 // Entities
 const entities = [];
-const MAX_ENTITIES = 300;
+let maxEntities = 30; // Starts at Easy (30)
+let difficultyTimer = 0;
 
 document.addEventListener('keydown', (e) => {
     if (keys.hasOwnProperty(e.code)) {
@@ -51,6 +52,8 @@ document.addEventListener('keyup', (e) => {
 function startGame() {
     gameState = 'PLAYING';
     score = 0;
+    maxEntities = 30;
+    difficultyTimer = 0;
     entities.length = 0;
     player.x = SCREEN_WIDTH / 2;
     player.y = SCREEN_HEIGHT - 30;
@@ -59,20 +62,29 @@ function startGame() {
 }
 
 function spawnEntity() {
-    if (entities.length >= MAX_ENTITIES) return;
+    if (entities.length >= maxEntities) return;
 
     // Random spawn position at top
     const x = Math.random() * (SCREEN_WIDTH - 10);
     const y = -10;
     
-    // Type: 0 = Linear Down, 1 = Homing, 2 = Bouncing
-    const type = Math.floor(Math.random() * 3);
+    // Difficulty Progression Logic for Types
+    // 0-10s: Mostly Bouncers (Type 2)
+    // 10s+: Add Homers (Type 1)
+    let type = 2; // Default Bouncer
+    
+    if (difficultyTimer > 10) {
+        if (Math.random() < 0.3) type = 1; // 30% chance of Homer
+    }
+    if (difficultyTimer > 30) {
+        if (Math.random() < 0.6) type = 1; // 60% chance of Homer
+    }
     
     entities.push({
         x: x,
         y: y,
-        width: 8,
-        height: 8,
+        width: 4, // 4x4 pixels as per reverse engineering
+        height: 4,
         vx: (Math.random() - 0.5) * 50,
         vy: 30 + Math.random() * 50,
         type: type,
@@ -82,6 +94,11 @@ function spawnEntity() {
 
 function update(dt) {
     if (gameState !== 'PLAYING') return;
+
+    // Difficulty Ramp
+    difficultyTimer += dt;
+    // Cap at Lunatic (200 entities)
+    maxEntities = Math.min(200, 30 + Math.floor(difficultyTimer * 2));
 
     // Player Movement
     if (keys.ArrowLeft) player.x -= player.speed * dt;
