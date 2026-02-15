@@ -1,0 +1,14 @@
+You are an expert reverse engineer and game developer. I have decompiled an old Windows game executable ("99.exe" or "Tokkun") using Ghidra and extracted resources using Resource Hacker.
+
+The decompiled C code is in `reverse_engineering_ref/decompiled/99.exe.c`.
+The resources (icons, version info) are in `reverse_engineering_ref/resources`.
+
+Your task is to "vibe reverse engineer" this game. This means you should:
+1.  Analyze the C code to identify the main game loop (`WinMain` or `FUN_...` that calls `PeekMessage`).
+2.  Understand the game state machine (Menu, Playing, Game Over).
+3.  Identify the entities (Player, Enemies) and their movement logic (likely a loop iterating over an array of structs).
+4.  Infer the game mechanics (Shooting? Dodging? Bullet patterns?) from the logic and variable names (e.g., collision checks against screen boundaries `0x140`, `0xf0`).
+5.  Based on this understanding, rewrite the game logic in a modern web format (Flask + JavaScript/Canvas).
+6.  Document the findings in `doc/game_logic.md`.
+
+Focus on capturing the "vibe" and core mechanics rather than a line-by-line translation. The goal is a playable web remake that feels like the original.
