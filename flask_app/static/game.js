@@ -14,10 +14,10 @@ let lastTime = 0;
 const player = {
     x: SCREEN_WIDTH / 2,
     y: SCREEN_HEIGHT - 30,
-    width: 16,
-    height: 16,
+    width: 12,  // Slightly smaller hitbox for ship feeling
+    height: 12, 
     speed: 150, // pixels per second
-    color: '#00ff00'
+    color: '#ffffff' // White body
 };
 
 // Input
@@ -64,9 +64,33 @@ function startGame() {
 function spawnEntity() {
     if (entities.length >= maxEntities) return;
 
-    // Random spawn position at top
-    const x = Math.random() * (SCREEN_WIDTH - 10);
-    const y = -10;
+    let x, y, vx, vy;
+    const speed = 30 + Math.random() * 50;
+    
+    // Random Spawn Position (Top, Bottom, Left, Right)
+    const side = Math.floor(Math.random() * 4); // 0: Top, 1: Bottom, 2: Left, 3: Right
+    
+    if (side === 0) { // Top
+        x = Math.random() * SCREEN_WIDTH;
+        y = -10;
+        vx = (Math.random() - 0.5) * 50;
+        vy = speed;
+    } else if (side === 1) { // Bottom
+        x = Math.random() * SCREEN_WIDTH;
+        y = SCREEN_HEIGHT + 10;
+        vx = (Math.random() - 0.5) * 50;
+        vy = -speed;
+    } else if (side === 2) { // Left
+        x = -10;
+        y = Math.random() * SCREEN_HEIGHT;
+        vx = speed;
+        vy = (Math.random() - 0.5) * 50;
+    } else { // Right
+        x = SCREEN_WIDTH + 10;
+        y = Math.random() * SCREEN_HEIGHT;
+        vx = -speed;
+        vy = (Math.random() - 0.5) * 50;
+    }
     
     // Difficulty Progression Logic for Types
     // 0-10s: Mostly Bouncers (Type 2)
@@ -83,12 +107,12 @@ function spawnEntity() {
     entities.push({
         x: x,
         y: y,
-        width: 4, // 4x4 pixels as per reverse engineering
+        width: 4, 
         height: 4,
-        vx: (Math.random() - 0.5) * 50,
-        vy: 30 + Math.random() * 50,
+        vx: vx,
+        vy: vy,
         type: type,
-        color: type === 1 ? '#ff0000' : (type === 2 ? '#ffff00' : '#ffa500')
+        color: type === 1 ? '#ff0000' : (type === 2 ? '#ffff00' : '#00ffff') // Red, Yellow, Cyan
     });
 }
 
@@ -152,10 +176,10 @@ function update(dt) {
             gameState = 'GAMEOVER';
         }
 
-        // Remove off-screen entities
-        if (ent.y > SCREEN_HEIGHT + 20 || ent.y < -50 || ent.x < -50 || ent.x > SCREEN_WIDTH + 50) {
+        // Remove off-screen entities (Optimized boundaries)
+        if (ent.y > SCREEN_HEIGHT + 50 || ent.y < -50 || ent.x < -50 || ent.x > SCREEN_WIDTH + 50) {
             entities.splice(i, 1);
-            score += 10;
+            // No score for removing, score is time based
         }
     }
 }
@@ -164,6 +188,14 @@ function draw() {
     // Clear Screen
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    
+    // Draw Stars (Simple Static Background for "Vibe")
+    ctx.fillStyle = '#444'; 
+    for(let i=0; i<50; i++) {
+        const sx = (i * 37) % SCREEN_WIDTH;
+        const sy = (i * 19 + lastTime/50) % SCREEN_HEIGHT;
+        ctx.fillRect(sx, sy, 1, 1);
+    }
 
     if (gameState === 'MENU') {
         ctx.fillStyle = '#ffffff';
@@ -182,23 +214,71 @@ function draw() {
         ctx.fillText('GAME OVER', SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 20);
         ctx.fillStyle = '#ffffff';
         ctx.font = '14px Arial';
-        ctx.fillText(`Final Score: ${score}`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 10);
-        ctx.fillText('Press SPACE to Restart', SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 40);
+        
+        // Rank / Rating based on time (score)
+        let rank = "Civilian";
+        if (score > 10) rank = "Trainee";
+        if (score > 30) rank = "Soldier";
+        if (score > 60) rank = "Veteran";
+        if (score > 100) rank = "Ace Pilot";
+        if (score > 1000) rank = "God";
+
+        ctx.fillText(`Time: ${(score).toFixed(2)}s`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 10);
+        ctx.fillText(`Rank: ${rank}`, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 30);
+        ctx.fillText('Press SPACE to Restart', SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 60);
         return;
     }
 
-    // Draw Player
-    ctx.fillStyle = player.color;
-    ctx.fillRect(player.x, player.y, player.width, player.height);
+    // Draw Player (Ship Style)
+    ctx.save();
+    ctx.translate(player.x + player.width/2, player.y + player.height/2);
+    // Body (White)
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.moveTo(0, -6);
+    ctx.lineTo(4, 4);
+    ctx.lineTo(-4, 4);
+    ctx.fill();
+    // Wings (Red)
+    ctx.fillStyle = '#f00';
+    ctx.beginPath();
+    ctx.moveTo(-4, 2);
+    ctx.lineTo(-7, 6);
+    ctx.lineTo(-4, 4);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(4, 2);
+    ctx.lineTo(7, 6);
+    ctx.lineTo(4, 4);
+    ctx.fill();
+    
+    // Engine Glow
+    ctx.fillStyle = '#0ff';
+    ctx.beginPath();
+    ctx.moveTo(-2, 5);
+    ctx.lineTo(0, 8);
+    ctx.lineTo(2, 5);
+    ctx.fill();
+    ctx.restore();
 
-    // Draw Entities
+    // Draw Entities (Glowing Dots)
     for (const ent of entities) {
         ctx.fillStyle = ent.color;
-        ctx.fillRect(ent.x, ent.y, ent.width, ent.height);
+        
+        ctx.beginPath();
+        ctx.arc(ent.x + ent.width/2, ent.y + ent.height/2, ent.width/2, 0, Math.PI*2);
+        
+        // Simple Glow Effect
+        // Note: extensive shadowBlur can be slow on Canvas, keeping it minimal
+        ctx.shadowBlur = 4;
+        ctx.shadowColor = ent.color;
+        ctx.fill();
+        ctx.shadowBlur = 0; // Reset
     }
     
     // Update Score Display HTML
-    scoreDisplay.innerText = `Score: ${score}`;
+    score = difficultyTimer; // Use survival time as score
+    scoreDisplay.innerText = `Time: ${score.toFixed(2)}s`;
 }
 
 function gameLoop(timestamp) {
