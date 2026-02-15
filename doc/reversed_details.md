@@ -17,14 +17,16 @@ The difficulty is determined by a state variable (`DAT_00406dc0`?) which sets th
   - **Level 2 (Hard):** 100 Bullets.
   - **Level 3 (Lunatic):** 200 Bullets.
 
-**Progression:**
-- The game tracks time/score (`DAT_00406d88`).
-- As the game progresses, `DAT_00406dbc` (Spawn Pattern/Mode?) changes.
-- `FUN_00402e88` (Spawn Function) switches behavior based on this mode:
-  - **Mode 2, 3, 4:** Sets Entity Type 1 (Homing) with decreasing delay/increasing speed (`0x30`, `0x20`, `0x10`).
-  - **Mode 6:** Sets Entity Type 3 (Linear?).
+## 3. Ending & Ranking Logic (`FUN_00404050`)
+The game determines the ending screen based on the final score (time survived).
 
-## 3. Entity System & Logic (`FUN_00402fbc`)
+- **Mechanism:** It iterates through a data array at `DAT_004067a3`.
+- **Logic:** It compares `Score < Threshold` in a loop.
+- **Sorting:** The thresholds are stored in **Descending Order** (Highest requirement first).
+- **String Pool Mechanism:** `DAT_004063e4` is not a single string but the start of a **multi-string pool**. The initialization function (`FUN_00402208`) iterates through this memory address, decrypting one null-terminated string at a time, calculating its length, and storing the *pointer* to it in a separate array (`DAT_00406bfc`). This allows the game to access multiple different text lines via index (0, 1, 2...) later.
+- **Encryption:** The text for these rankings is stored at `DAT_004063e4` and is **XOR encoded** (Bitwise NOT / `^ 0xFF`) to hide it from simple text searches. It is decoded at runtime by `FUN_004021f4`.
+
+## 4. Entity System & Logic (`FUN_00402fbc`)
 The game manages an array of ~300 entities. Each entity is a struct (approx 16 bytes).
 
 **Structure:**

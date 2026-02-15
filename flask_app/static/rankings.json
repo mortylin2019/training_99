@@ -1,0 +1,308 @@
+[
+  {
+    "threshold_ms": 180000,
+    "id3": 35,
+    "id4": 86,
+    "title_combined": "愛の人勢いのある"
+  },
+  {
+    "threshold_ms": 175000,
+    "id3": 35,
+    "id4": 86,
+    "title_combined": "愛の人勢いのある"
+  },
+  {
+    "threshold_ms": 170000,
+    "id3": 36,
+    "id4": 86,
+    "title_combined": "奇跡の人勢いのある"
+  },
+  {
+    "threshold_ms": 165000,
+    "id3": 37,
+    "id4": 86,
+    "title_combined": "ナマモノ勢いのある"
+  },
+  {
+    "threshold_ms": 160000,
+    "id3": 37,
+    "id4": 86,
+    "title_combined": "ナマモノ勢いのある"
+  },
+  {
+    "threshold_ms": 157000,
+    "id3": 90,
+    "id4": 81,
+    "title_combined": "と認定する。"
+  },
+  {
+    "threshold_ms": 155000,
+    "id3": 38,
+    "id4": 86,
+    "title_combined": "クダモノ勢いのある"
+  },
+  {
+    "threshold_ms": 150000,
+    "id3": 39,
+    "id4": 86,
+    "title_combined": "アレ勢いのある"
+  },
+  {
+    "threshold_ms": 145000,
+    "id3": 40,
+    "id4": 84,
+    "title_combined": "ケダモノ以上。"
+  },
+  {
+    "threshold_ms": 140000,
+    "id3": 40,
+    "id4": 84,
+    "title_combined": "ケダモノ以上。"
+  },
+  {
+    "threshold_ms": 135000,
+    "id3": 41,
+    "id4": 84,
+    "title_combined": "paranoia以上。"
+  },
+  {
+    "threshold_ms": 130000,
+    "id3": 42,
+    "id4": 84,
+    "title_combined": "究極超人以上。"
+  },
+  {
+    "threshold_ms": 125000,
+    "id3": 42,
+    "id4": 87,
+    "title_combined": "究極超人愛の狩人"
+  },
+  {
+    "threshold_ms": 120000,
+    "id3": 43,
+    "id4": 86,
+    "title_combined": "バケモノ勢いのある"
+  },
+  {
+    "threshold_ms": 115000,
+    "id3": 44,
+    "id4": 84,
+    "title_combined": "<BAD_DATA_IDX_44>以上。"
+  },
+  {
+    "threshold_ms": 110000,
+    "id3": 45,
+    "id4": 84,
+    "title_combined": "<BAD_DATA_IDX_45>以上。"
+  },
+  {
+    "threshold_ms": 105000,
+    "id3": 46,
+    "id4": 84,
+    "title_combined": "嵐を呼ぶ男以上。"
+  },
+  {
+    "threshold_ms": 100000,
+    "id3": 47,
+    "id4": 84,
+    "title_combined": "達人以上。"
+  },
+  {
+    "threshold_ms": 95000,
+    "id3": 48,
+    "id4": 81,
+    "title_combined": "ナイスガイと認定する。"
+  },
+  {
+    "threshold_ms": 90000,
+    "id3": 49,
+    "id4": 81,
+    "title_combined": "マシィーンと認定する。"
+  },
+  {
+    "threshold_ms": 85000,
+    "id3": 49,
+    "id4": 81,
+    "title_combined": "マシィーンと認定する。"
+  },
+  {
+    "threshold_ms": 80000,
+    "id3": 50,
+    "id4": 81,
+    "title_combined": "ファーストチルドレンと認定する。"
+  },
+  {
+    "threshold_ms": 75000,
+    "id3": 50,
+    "id4": 81,
+    "title_combined": "ファーストチルドレンと認定する。"
+  },
+  {
+    "threshold_ms": 70000,
+    "id3": 51,
+    "id4": 81,
+    "title_combined": "兄貴と認定する。"
+  },
+  {
+    "threshold_ms": 65000,
+    "id3": 203,
+    "id4": 171,
+    "title_combined": ""
+  },
+  {
+    "threshold_ms": 60000,
+    "id3": 201,
+    "id4": 167,
+    "title_combined": ""
+  },
+  {
+    "threshold_ms": 55000,
+    "id3": 54,
+    "id4": 88,
+    "title_combined": "ダンスマニア何やってんだ"
+  },
+  {
+    "threshold_ms": 53000,
+    "id3": 55,
+    "id4": 85,
+    "title_combined": "いくさ人と呼ばせてください。"
+  },
+  {
+    "threshold_ms": 50000,
+    "id3": 56,
+    "id4": 81,
+    "title_combined": "もののふと認定する。"
+  },
+  {
+    "threshold_ms": 47000,
+    "id3": 57,
+    "id4": 81,
+    "title_combined": "<BAD_DATA_IDX_57>と認定する。"
+  },
+  {
+    "threshold_ms": 45000,
+    "id3": 58,
+    "id4": 81,
+    "title_combined": "<BAD_DATA_IDX_58>と認定する。"
+  },
+  {
+    "threshold_ms": 44000,
+    "id3": 59,
+    "id4": 81,
+    "title_combined": "Aチームと認定する。"
+  },
+  {
+    "threshold_ms": 40000,
+    "id3": 60,
+    "id4": 81,
+    "title_combined": "逃亡者と認定する。"
+  },
+  {
+    "threshold_ms": 37000,
+    "id3": 60,
+    "id4": 81,
+    "title_combined": "逃亡者と認定する。"
+  },
+  {
+    "threshold_ms": 35000,
+    "id3": 61,
+    "id4": 81,
+    "title_combined": "ミト王子と認定する。"
+  },
+  {
+    "threshold_ms": 34000,
+    "id3": 62,
+    "id4": 81,
+    "title_combined": "部長と認定する。"
+  },
+  {
+    "threshold_ms": 30000,
+    "id3": 63,
+    "id4": 83,
+    "title_combined": "課長と呼ばせていただく。"
+  },
+  {
+    "threshold_ms": 27000,
+    "id3": 64,
+    "id4": 82,
+    "title_combined": "係長に任命する。闘って死ね。"
+  },
+  {
+    "threshold_ms": 25000,
+    "id3": 65,
+    "id4": 81,
+    "title_combined": "主任と認定する。"
+  },
+  {
+    "threshold_ms": 20000,
+    "id3": 66,
+    "id4": 81,
+    "title_combined": "壁と認定する。"
+  },
+  {
+    "threshold_ms": 17000,
+    "id3": 67,
+    "id4": 81,
+    "title_combined": "お調子者と認定する。"
+  },
+  {
+    "threshold_ms": 15000,
+    "id3": 68,
+    "id4": 81,
+    "title_combined": "弾拾いと認定する。"
+  },
+  {
+    "threshold_ms": 14000,
+    "id3": 69,
+    "id4": 81,
+    "title_combined": "買い出し部隊パシリと認定する。"
+  },
+  {
+    "threshold_ms": 13000,
+    "id3": 70,
+    "id4": 81,
+    "title_combined": "レーザーのレンズ磨きと認定する。"
+  },
+  {
+    "threshold_ms": 12000,
+    "id3": 71,
+    "id4": 81,
+    "title_combined": "使い捨ての駒と認定する。"
+  },
+  {
+    "threshold_ms": 10000,
+    "id3": 72,
+    "id4": 81,
+    "title_combined": "サル見習いと認定する。"
+  },
+  {
+    "threshold_ms": 8000,
+    "id3": 73,
+    "id4": 81,
+    "title_combined": "便所掃除と認定する。"
+  },
+  {
+    "threshold_ms": 5000,
+    "id3": 74,
+    "id4": 81,
+    "title_combined": "君をと認定する。"
+  },
+  {
+    "threshold_ms": 3000,
+    "id3": 75,
+    "id4": 81,
+    "title_combined": "貴様をと認定する。"
+  },
+  {
+    "threshold_ms": 1000,
+    "id3": 76,
+    "id4": 81,
+    "title_combined": "あなたはと認定する。"
+  },
+  {
+    "threshold_ms": 500,
+    "id3": 92,
+    "id4": 0,
+    "title_combined": "敵前逃亡する"
+  }
+]
