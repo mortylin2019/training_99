@@ -67,67 +67,74 @@ class PlayerAI:
     def perform_move(self):
         px, py = self.game.get_player_pos()
         bullets = self.game.get_bullets()
-        
-        # Directions: (dx, dy)
-        directions = {
-            "STAY": (0, 0),
-            "UP": (0, -self.step),
-            "DOWN": (0, self.step),
-            "LEFT": (-self.step, 0),
-            "RIGHT": (self.step, 0)
-        }
-        
-        best_dir = "STAY"
-        min_score = float('inf')
-        
-        # Filter active bullets. Based on RE, angle_index != 0xFF is the primary indicator.
-        # We'll use active > 0 as a secondary check if available.
         active_bullets = [b for b in bullets if b.angle_index != 0xFF]
         
-        for name, (dx, dy) in directions.items():
-            tx, ty = px + dx, py + dy
+        if not active_bullets:
+            # If no bullets, don't move
+            self.game.write_int(0x00406d7c, 0)
+            print(f"\r[FPS:{self.current_fps:>2.0f}] [B:  0] Pos:({px:>3},{py:>3}) | Move:STAY  | Status:CLEAR   ", end="")
+            return
+
+        # Vector-based Repulsion: sum of normalized vectors away from every bullet
+        rx, ry = 0.0, 0.0
+        for b in active_bullets:
+            dx = px - b.x
+            dy = py - b.y
+            dist_sq = dx*dx + dy*dy
+            if dist_sq < 1: dist_sq = 1
+            dist = math.sqrt(dist_sq)
             
-            # Boundary check
-            if tx < 5 or tx > 310 or ty < 5 or ty > 230:
-                continue
-                
-            threat_score = 0
-            for b in active_bullets:
-                bx, by = b.x, b.y
-                
-                # Simple linear prediction for bouncing bullets
-                if b.type == 2:
-                    bx += b.vx * 10
-                    by += b.vy * 10
-                
-                dist = math.sqrt((tx - bx)**2 + (ty - by)**2)
-                
-                # COLLISION ZONE (Danger!)
-                if dist < 15:
-                    threat_score += 5000 / (dist + 1) # Exponentially bad
-                # CAUTION ZONE
-                elif dist < self.safety_radius:
-                    threat_score += (self.safety_radius - dist) * 10
-            
-            # Weighted bias: prefer center-bottom (152, 200)
-            target_x, target_y = 152, 200
-            center_dist = math.sqrt((tx - target_x)**2 + (ty - target_y)**2)
-            
-            bias = center_dist / 10.0
-            move_penalty = 15.0 if name != "STAY" else 0.0
-            
-            total_score = threat_score + bias + move_penalty
-            
-            if total_score < min_score:
-                min_score = total_score
-                best_dir = name
+            # Repulsion weight increases sharply as distance decreases
+            weight = 1000.0 / dist_sq
+            rx += (dx / dist) * weight
+            ry += (dy / dist) * weight
+
+        # Tactical Home: Pull towards screen center (160, 120)
+        cx, cy = 160 - px, 120 - py
+        c_dist = math.sqrt(cx*cx + cy*cy) or 1.0
         
+        # Home pull is now significantly stronger when pressure is low
+        # Scales with distance but has a higher baseline
+        home_pull = 0.8
+        rx += (cx / c_dist) * home_pull
+        ry += (cy / c_dist) * home_pull
+
+        # Boundary Repulsion: Push away from edges (50px margin)
+        margin = 50
+        if px < margin: rx += (margin - px) / 10.0
+        if px > (320 - margin): rx -= (px - (320 - margin)) / 10.0
+        if py < margin: ry += (margin - py) / 10.0
+        if py > (240 - margin): ry -= (py - (240 - margin)) / 10.0
+
+        # Movement Resolution (Supports Diagonals)
+        input_bits = 0
+        
+        # Horizontal
+        if rx > 0.1:  input_bits |= 8  # RIGHT
+        elif rx < -0.1: input_bits |= 1  # LEFT
+        
+        # Vertical
+        if ry > 0.1:  input_bits |= 4  # DOWN
+        elif ry < -0.1: input_bits |= 2  # UP
+
+        # Boundary Safety: Mask bits if moving into walls
+        if px < 15: input_bits &= ~1 # Block LEFT
+        if px > 305: input_bits &= ~8 # Block RIGHT
+        if py < 15: input_bits &= ~2 # Block UP
+        if py > 225: input_bits &= ~4 # Block DOWN
+
         # Inject move
-        input_map = {"STAY": 0, "LEFT": 1, "DOWN": 2, "UP": 4, "RIGHT": 8}
-        self.game.write_int(0x00406d7c, input_map.get(best_dir, 0))
+        self.game.write_int(0x00406d7c, input_bits)
         
-        # Debug output
-        print(f"\r[FPS:{self.current_fps:>2.0f}] [Bullets:{len(active_bullets):>3}] Pos:({px:>3},{py:>3}) | Move:{best_dir:<5} | Score:{int(min_score):>4}   ", end="")
+        # Debug Output
+        move_desc = []
+        if input_bits & 1: move_desc.append("L")
+        if input_bits & 8: move_desc.append("R")
+        if input_bits & 2: move_desc.append("U")
+        if input_bits & 4: move_desc.append("D")
+        move_str = "".join(move_desc) if move_desc else "STAY"
+        
+        print(f"\r[FPS:{self.current_fps:>2.0f}] [B:{len(active_bullets):>3}] Pos:({px:>3},{py:>3}) | Move:{move_str:<5} | Pressure:{math.sqrt(rx*rx+ry*ry):>7.4f}   ", end="")
 
 if __name__ == "__main__":
     ai = PlayerAI()
