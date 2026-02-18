@@ -14,122 +14,134 @@ class PlayerAI:
         self.safety_margin = 10   # Slightly tighter safety to allow gap-threading
         self.move_speed = 4       # Estimated px per logical tick
         
-        # Performance
-        self.last_time = time.time()
-        self.frame_count = 0
-        self.current_fps = 0
+        # Performance tracking
         self.last_latency = 0
-
-    def start(self):
-        if not self.game.launch_game(): return
-        last_state = -1
-        try:
-            while True:
-                state = self.game.get_game_state()
-                if state != last_state:
-                    self.game.write_int(0x00406d7c, 0)
-                    if state in [0, 5, 6]: self.game.press_enter()
-                    last_state = state
-
-                if state == 1:
-                    self.perform_move()
-                    self.frame_count += 1
-                    if time.time() - self.last_time >= 1.0:
-                        self.current_fps = self.frame_count
-                        self.frame_count = 0
-                        self.last_time = time.time()
-                    time.sleep(0.01)
-                else:
-                    self.game.write_int(0x00406d7c, 0)
-                    time.sleep(0.1)
-        except KeyboardInterrupt:
-            self.game.write_int(0x00406d7c, 0)
 
     def perform_move(self):
         start_eval = time.time()
         px, py = self.game.get_player_pos()
         bullets = self.game.get_bullets()
-        # Read survival frames (Score) from 0x00406d88
-        # Read multiplier from 0x00406d8c (usually 16 for Normal, 12 for Hard)
         frames = self.game.read_int(0x00406d88) or 0
         multiplier = self.game.read_int(0x00406d8c) or 16
         total_ms = frames * multiplier
         
         active_bullets = [b for b in bullets if b.angle_index != 0xFF]
-
         if not active_bullets:
             self.game.write_int(0x00406d7c, 0)
             return
 
-        # Possible velocity vectors for the player (8-way + STAY)
-        candidates = {
+        # Candidate directions (8-way + STAY)
+        directions = {
             "STAY": (0, 0),
             "L": (-1, 0), "R": (1, 0), "U": (0, -1), "D": (0, 1),
-            "LU": (-0.7, -0.7), "LD": (-0.7, 0.7), "RU": (0.7, -0.7), "RD": (0.7, 0.7)
+            "LU": (-0.71, -0.71), "LD": (-0.71, 0.71), "RU": (0.71, -0.71), "RD": (0.71, 0.71)
         }
-        
         bits_map = {
             "STAY": 0, "L": 1, "U": 2, "D": 4, "R": 8,
             "LU": 1|2, "LD": 1|4, "RU": 8|2, "RD": 8|4
         }
 
-        best_move = "STAY"
-        max_score = -9999999
-        final_survival = 0
-
-        for name, (v_x, v_y) in candidates.items():
-            survival_frames = 0
-            collision_occurred = False
-            total_path_danger = 0
+        # Simplified bullet prediction for simulation
+        # pre-calculate bullet states at specific frame steps to speed up
+        bullet_predict = []
+        for b in active_bullets:
+            states = []
+            bx, by = b.x, b.y
+            # Basic speed for angle-based bullets
+            # In Stage2_GameEntityLoop.c, lookup tables suggest speed is approx 2.5-3.0 px/frame
+            speed = 2.5 
+            rad = b.angle_index * (2 * math.pi / 256)
+            cos_a = math.cos(rad)
+            sin_a = math.sin(rad)
             
-            # Predict collisions over sim_frames
-            for f in range(1, self.sim_frames + 1):
-                ppx = px + (v_x * self.move_speed * f)
-                ppy = py + (v_y * self.move_speed * f)
-                
-                # Boundary check - if we hit a wall, that's the end of survival for this path
-                if ppx < 8 or ppx > 312 or ppy < 8 or ppy > 232:
-                    collision_occurred = True
-                    break
-                
-                frame_danger = 0
-                for b in active_bullets:
-                    bx, by = b.x, b.y
-                    if b.type == 2:
-                        bx += b.vx * f
-                        by += b.vy * f
-                    else:
-                        bx += (f * 2.5) * math.cos(b.angle_index * 2 * math.pi / 256)
-                        by += (f * 2.5) * math.sin(b.angle_index * 2 * math.pi / 256)
-                    
-                    dist_sq = (ppx - bx)**2 + (ppy - by)**2
-                    if dist_sq < self.safety_margin**2:
-                        collision_occurred = True
-                        break
-                    
-                    # Inverse distance law for path danger
-                    frame_danger += 100.0 / (dist_sq + 1)
-                
-                if collision_occurred: break
-                survival_frames += 1
-                total_path_danger += frame_danger
+            for f in range(self.sim_frames + 1):
+                if b.type == 2:
+                    # Type 2 uses raw vx/vy which are not shifted
+                    # stage2: *local_2c = *local_2c + vx; -> raw_x += vx
+                    # so dx = vx/64.0 per frame
+                    states.append((bx + (b.vx/64.0)*f, by + (b.vy/64.0)*f))
+                else:
+                    states.append((bx + speed*f*cos_a, by + speed*f*sin_a))
+            bullet_predict.append(states)
 
-            # Scoring: Primary is survival time, secondary is low path danger, tertiary is center bias
-            center_dist = math.sqrt((px - 160)**2 + (py - 180)**2)
-            # Factor in movement penalty to reduce jitter
-            move_penalty = 50 if name != "STAY" else 0
+        best_branch_move = "STAY"
+        max_branch_score = -999999999
+        best_final_survival = 0
+
+        # Two-stage lookahead: 81 paths (9 choices for 30f, then 9 choices for 30f)
+        mid_f = self.sim_frames // 2
+        
+        for name1, (v1x, v1y) in directions.items():
+            # First leg simulation
+            survive1 = 0
+            danger1 = 0
+            px1, py1 = px, py
+            collision1 = False
             
-            score = (survival_frames * 5000) - total_path_danger - (center_dist * 2) - move_penalty
+            for f in range(1, mid_f + 1):
+                px1 = px + (v1x * self.move_speed * f)
+                py1 = py + (v1y * self.move_speed * f)
+                
+                if px1 < 8 or px1 > 312 or py1 < 8 or py1 > 232:
+                    collision1 = True; break
+                
+                for b_states in bullet_predict:
+                    bx, by = b_states[f]
+                    ds = (px1-bx)**2 + (py1-by)**2
+                    if ds < self.safety_margin**2:
+                        collision1 = True; break
+                    danger1 += 10.0 / (ds + 1)
+                if collision1: break
+                survive1 += 1
+            
+            if collision1:
+                score1 = survive1 * 1000 - danger1
+                if score1 > max_branch_score:
+                    max_branch_score = score1
+                    best_branch_move = name1
+                    best_final_survival = survive1
+                continue
 
-            if score > max_score:
-                max_score = score
-                best_move = name
-                final_survival = survival_frames
+            # Second leg simulation (only if first leg survives)
+            for name2, (v2x, v2y) in directions.items():
+                survive2 = 0
+                danger2 = 0
+                px2, py2 = px1, py1
+                collision2 = False
+                
+                for f in range(mid_f + 1, self.sim_frames + 1):
+                    # Relative frame in second leg
+                    rel_f = f - mid_f
+                    px2 = px1 + (v2x * self.move_speed * rel_f)
+                    py2 = py1 + (v2y * self.move_speed * rel_f)
+                    
+                    if px2 < 8 or px2 > 312 or py2 < 8 or py2 > 232:
+                        collision2 = True; break
+                    
+                    for b_states in bullet_predict:
+                        bx, by = b_states[f]
+                        ds = (px2-bx)**2 + (py2-by)**2
+                        if ds < self.safety_margin**2:
+                            collision2 = True; break
+                        danger2 += 10.0 / (ds + 1)
+                    if collision2: break
+                    survive2 += 1
+                
+                # Scoring
+                total_survive = survive1 + survive2
+                total_danger = danger1 + danger2
+                # Target center-bottom (160, 200)
+                dist_penalty = math.sqrt((px2-160)**2 + (py2-200)**2) * 2
+                
+                score = (total_survive * 10000) - total_danger - dist_penalty
+                
+                if score > max_branch_score:
+                    max_branch_score = score
+                    best_branch_move = name1
+                    best_final_survival = total_survive
 
-        # Inject move
-        self.game.write_int(0x00406d7c, bits_map[best_move])
+        # Execute
+        self.game.write_int(0x00406d7c, bits_map[best_branch_move])
         self.last_latency = (time.time() - start_eval) * 1000
         
-        # Display: Game Score | Raw Tick | Process Latency | Survival Forecast
-        # Match the game's display format: Seconds.Milliseconds
-        print(f"\r[Score:{total_ms/1000:>6.3f}s] [T:{frames:>5}] [LAT:{self.last_latency:>2.0f}ms] [B:{len(active_bullets):>3}] Move:{best_move:<4} | Forecast:{final_survival:>2}f   ", end="")
+        print(f"\r[Score:{total_ms/1000:>6.3f}s] [T:{frames:>5}] [LAT:{self.last_latency:>2.0f}ms] [B:{len(active_bullets):>3}] Move:{best_branch_move:<4} | Forecast:{best_final_survival:>2}f   ", end="")

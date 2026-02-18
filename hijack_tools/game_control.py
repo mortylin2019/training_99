@@ -25,6 +25,8 @@ ADDR_PLAYER_X = 0x00406d6c
 ADDR_PLAYER_Y = 0x00406d70
 ADDR_GAME_STATE = 0x00406d84 # Using G_PauseFlag as it is the real state indicator
 ADDR_INPUT_STATE = 0x00406d7c
+ADDR_GAME_TIME = 0x00406d88 # Raw frames/ticks
+ADDR_SCORE_MULTIPLIER = 0x00406d8c
 ADDR_BULLET_COUNT = 0x00406da8
 ADDR_ENTITY_ARRAY = 0x00406e10
 ENTITY_SIZE = 15 # The game increments entity pointer by 0x0F (15 bytes)
@@ -35,13 +37,14 @@ class GameControl:
         self.process_handle = None
         self.pid = None
         self.hwnd = None
+        self.proc = None
 
     def launch_game(self):
         """Launches the game and attaches to its process."""
         print(f"Launching {self.exe_path}...")
         try:
-            proc = subprocess.Popen(self.exe_path, cwd=os.path.dirname(self.exe_path))
-            self.pid = proc.pid
+            self.proc = subprocess.Popen(self.exe_path, cwd=os.path.dirname(self.exe_path))
+            self.pid = self.proc.pid
             time.sleep(1) # Wait for window to initialize
             
             # Find Window
@@ -210,14 +213,71 @@ class GameControl:
         except KeyboardInterrupt:
             print("\nMonitoring stopped.")
 
+    def cleanup(self):
+        """Kills the game process if it is running."""
+        if self.proc:
+            print(f"\nClosing game process (PID: {self.pid})...")
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+
     def run_ai(self):
-        """Runs the AI avoidance logic."""
-        # ai_1: Repulsion Vector (Classical Logic)
-        # ai_2: 1/d^2 Safest Cell (Point-based Logic)
+        """Runs the AI avoidance logic with state management and logging."""
         # ai_3: Oracle Simulation (Predictive Logic) - RECOMMENDED
         from ai_3 import PlayerAI
         ai = PlayerAI(self)
-        ai.start()
+        
+        if not self.launch_game(): return
+        
+        last_state = -1
+        max_bullets = 0
+        run_start_time = 0
+        
+        print("AI Controller started. Monitoring game states...")
+        
+        try:
+            while True:
+                state = self.get_game_state()
+                
+                # State transition handling
+                if state != last_state:
+                    self.write_int(ADDR_INPUT_STATE, 0) # Clear inputs on transition
+                    
+                    if state == 1: # Playing - New Game Started
+                        max_bullets = 0
+                        run_start_time = time.time()
+                        print(f"\n[RUN STARTED] {time.strftime('%H:%M:%S')}")
+                    
+                    if state == 2: # Player just died
+                        frames = self.read_int(ADDR_GAME_TIME) or 0
+                        multiplier = self.read_int(ADDR_SCORE_MULTIPLIER) or 16
+                        final_sec = (frames * multiplier) / 1000
+                        print(f"\n[RUN FINISHED] Score: {final_sec:.3f}s | Ticks: {frames} | Max Bullets: {max_bullets}")
+                    
+                    if state in [0, 5, 6]: # Title / Results / Ranking
+                        self.press_enter()
+                        
+                    last_state = state
+
+                if state == 1: # Playing
+                    bullets = self.get_bullets()
+                    active_count = len([b for b in bullets if b.angle_index != 0xFF])
+                    if active_count > max_bullets:
+                        max_bullets = active_count
+                        
+                    ai.perform_move()
+                    time.sleep(0.01) # Approx 100Hz logic loop
+                else:
+                    self.write_int(ADDR_INPUT_STATE, 0)
+                    time.sleep(0.1)
+                    
+        except KeyboardInterrupt:
+            self.write_int(ADDR_INPUT_STATE, 0)
+            print("\nAI Controller stopped by user.")
+        finally:
+            self.cleanup()
 
 if __name__ == "__main__":
     game = GameControl()
