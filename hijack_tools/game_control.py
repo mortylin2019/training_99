@@ -23,8 +23,10 @@ VK_SPACE = 0x20
 # These are gathered from the reverse engineering analysis
 ADDR_PLAYER_X = 0x00406d6c
 ADDR_PLAYER_Y = 0x00406d70
-ADDR_GAME_STATE = 0x00406d84 # Using G_PauseFlag as it is the real state indicator
+ADDR_GAME_STATE = 0x00406d74 # Real game state machine
+ADDR_PAUSE_FLAG = 0x00406d84 # 1 = Active/Playing, 0 = Paused/Menu
 ADDR_INPUT_STATE = 0x00406d7c
+ADDR_GAME_OVER = 0x00406d80 # 1 if dead, 0 if alive
 ADDR_GAME_TIME = 0x00406d88 # Raw frames/ticks
 ADDR_SCORE_MULTIPLIER = 0x00406d8c
 ADDR_BULLET_COUNT = 0x00406da8
@@ -231,46 +233,51 @@ class GameControl:
         
         if not self.launch_game(): return
         
-        last_state = -1
+        in_run = False
         max_bullets = 0
-        run_start_time = 0
         
         print("AI Controller started. Monitoring game states...")
         
         try:
             while True:
-                state = self.get_game_state()
+                # 0x406d84 (PauseFlag) is the most reliable "In Active Play" indicator.
+                # It is 1 when unpaused and playing, 0 in menus/pause.
+                is_playing = self.read_int(ADDR_PAUSE_FLAG) == 1
+                is_dead = self.read_int(ADDR_GAME_OVER) == 1
+                state = self.read_int(ADDR_GAME_STATE)
                 
-                # State transition handling
-                if state != last_state:
-                    self.write_int(ADDR_INPUT_STATE, 0) # Clear inputs on transition
-                    
-                    if state == 1: # Playing - New Game Started
-                        max_bullets = 0
-                        run_start_time = time.time()
-                        print(f"\n[RUN STARTED] {time.strftime('%H:%M:%S')}")
-                    
-                    if state == 2: # Player just died
-                        frames = self.read_int(ADDR_GAME_TIME) or 0
-                        multiplier = self.read_int(ADDR_SCORE_MULTIPLIER) or 16
-                        final_sec = (frames * multiplier) / 1000
-                        print(f"\n[RUN FINISHED] Score: {final_sec:.3f}s | Ticks: {frames} | Max Bullets: {max_bullets}")
-                    
-                    if state in [0, 5, 6]: # Title / Results / Ranking
-                        self.press_enter()
-                        
-                    last_state = state
+                # Check for run start
+                if is_playing and not is_dead and not in_run:
+                    in_run = True
+                    max_bullets = 0
+                    print(f"\n[NEW GAME] Started at {time.strftime('%H:%M:%S')}")
 
-                if state == 1: # Playing
+                # Check for run end
+                if in_run and (not is_playing or is_dead):
+                    in_run = False
+                    frames = self.read_int(ADDR_GAME_TIME) or 0
+                    multiplier = self.read_int(ADDR_SCORE_MULTIPLIER) or 16
+                    final_sec = (frames * multiplier) / 1000
+                    print(f"\n[RUN FINISHED] Time: {final_sec:.3f}s | Ticks: {frames} | Max Bullets: {max_bullets}")
+                    time.sleep(1.0) 
+
+                # Auto-navigation for menus (State machine based)
+                # If we are not playing and not dead, we are likely in a menu
+                if not is_playing and not in_run:
+                    self.write_int(ADDR_INPUT_STATE, 0)
+                    self.press_enter()
+                    time.sleep(0.2)
+
+                # Active Gameplay Logic
+                if in_run and is_playing:
                     bullets = self.get_bullets()
                     active_count = len([b for b in bullets if b.angle_index != 0xFF])
                     if active_count > max_bullets:
                         max_bullets = active_count
                         
                     ai.perform_move()
-                    time.sleep(0.01) # Approx 100Hz logic loop
+                    time.sleep(0.01)
                 else:
-                    self.write_int(ADDR_INPUT_STATE, 0)
                     time.sleep(0.1)
                     
         except KeyboardInterrupt:

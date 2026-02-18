@@ -10,11 +10,10 @@ class PlayerAI:
         self.game = game_instance if game_instance else GameControl()
         
         # Hyperparameters for the "Oracle" Logic
-        self.sim_frames = 60      # Increased lookahead to 1.0s (60 frames)
-        self.safety_margin = 10   # Slightly tighter safety to allow gap-threading
-        self.move_speed = 4       # Estimated px per logical tick
+        self.sim_frames = 60      # 1.0s lookahead
+        self.safety_margin = 7    # Tightened from 10 to allow threading narrow gaps
+        self.move_speed = 4       # 4px per frame (verified from asm)
         
-        # Performance tracking
         self.last_latency = 0
 
     def perform_move(self):
@@ -40,6 +39,13 @@ class PlayerAI:
             "STAY": 0, "L": 1, "U": 2, "D": 4, "R": 8,
             "LU": 1|2, "LD": 1|4, "RU": 8|2, "RD": 8|4
         }
+        
+        # Game hitbox (from Stage2_GameEntityLoop.c): 
+        # Collision if: 2 <= (bx - px) <= 12 AND 0 <= (by - py) <= 9
+        # Coordinate Delta check from Stage2_GameEntityLoop.c:
+        # if ((dX - 2U < 11) && (dY < 10))
+        # dX = BX - PX, dY = BY - PY
+        # So hit if: 2 <= BX-PX < 13 AND 0 <= BY-PY < 10
 
         # Simplified bullet prediction for simulation
         # pre-calculate bullet states at specific frame steps to speed up
@@ -87,15 +93,20 @@ class PlayerAI:
                 
                 for b_states in bullet_predict:
                     bx, by = b_states[f]
-                    ds = (px1-bx)**2 + (py1-by)**2
-                    if ds < self.safety_margin**2:
+                    dx, dy = bx - px1, by - py1
+                    # Exact Rectangular Hitbox check
+                    if (2.0 <= dx < 13.0) and (0.0 <= dy < 10.0):
                         collision1 = True; break
-                    danger1 += 10.0 / (ds + 1)
+                    
+                    # Proximity danger (distance to center of hitbox)
+                    dist_sq = (dx - 7.5)**2 + (dy - 5.0)**2
+                    danger1 += 1.0 / (dist_sq + 1)
                 if collision1: break
                 survive1 += 1
             
             if collision1:
-                score1 = survive1 * 1000 - danger1
+                # Still score it so we can pick the "least bad" move if all die
+                score1 = (survive1 * 1000) - danger1
                 if score1 > max_branch_score:
                     max_branch_score = score1
                     best_branch_move = name1
@@ -120,20 +131,24 @@ class PlayerAI:
                     
                     for b_states in bullet_predict:
                         bx, by = b_states[f]
-                        ds = (px2-bx)**2 + (py2-by)**2
-                        if ds < self.safety_margin**2:
+                        dx, dy = bx - px2, by - py2
+                        if (2.0 <= dx < 13.0) and (0.0 <= dy < 10.0):
                             collision2 = True; break
-                        danger2 += 10.0 / (ds + 1)
+                        
+                        dist_sq = (dx - 7.5)**2 + (dy - 5.0)**2
+                        danger2 += 1.0 / (dist_sq + 1)
                     if collision2: break
                     survive2 += 1
                 
                 # Scoring
                 total_survive = survive1 + survive2
                 total_danger = danger1 + danger2
-                # Target center-bottom (160, 200)
-                dist_penalty = math.sqrt((px2-160)**2 + (py2-200)**2) * 2
                 
-                score = (total_survive * 10000) - total_danger - dist_penalty
+                # Target center-bottom (160, 200)
+                dist_penalty = math.sqrt((px2-160)**2 + (py2-200)**2) * 5
+                
+                # Survival time is the highest priority. 
+                score = (total_survive * 1000000) - (total_danger * 50) - dist_penalty
                 
                 if score > max_branch_score:
                     max_branch_score = score
@@ -144,4 +159,5 @@ class PlayerAI:
         self.game.write_int(0x00406d7c, bits_map[best_branch_move])
         self.last_latency = (time.time() - start_eval) * 1000
         
+        # Display: Match the game's display format: Seconds.Milliseconds
         print(f"\r[Score:{total_ms/1000:>6.3f}s] [T:{frames:>5}] [LAT:{self.last_latency:>2.0f}ms] [B:{len(active_bullets):>3}] Move:{best_branch_move:<4} | Forecast:{best_final_survival:>2}f   ", end="")
