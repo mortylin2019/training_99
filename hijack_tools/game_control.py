@@ -3,35 +3,13 @@ import time
 import subprocess
 import os
 import struct
-from dataclasses import dataclass
+try:
+    from bullet_data import Bullet
+except ImportError:
+    from hijack_tools.bullet_data import Bullet
 
 # Windows Constants
 PROCESS_ALL_ACCESS = 0x1F0FFF
-@dataclass
-class Bullet:
-    raw_x: int
-    raw_y: int
-    angle_index: int  # Offset 0x08 - Direction for Type 0/1/3
-    active: int       # Offset 0x09
-    type: int         # Offset 0x0A (0: Normal, 1: Homing, 2: Bounce, 3: Accel)
-    timer: int        # Offset 0x0B
-    index: int        # Offset 0x0C
-    vx: int           # Offset 0x0D - Direct speed for Type 2
-    vy: int           # Offset 0x0E - Direct speed for Type 2
-
-    @property
-    def x(self) -> int:
-        return (self.raw_x >> 6) - 4
-
-    @property
-    def y(self) -> int:
-        return (self.raw_y >> 6) - 4
-
-    def __repr__(self):
-        # Type 2 uses simple vx/vy, others use angle_index to look up vectors
-        move_info = f"v={self.vx},{self.vy}" if self.type == 2 else f"angle={self.angle_index}"
-        return f"({self.x},{self.y},T{self.type},{move_info})"
-
 WM_KEYDOWN = 0x100
 WM_KEYUP = 0x101
 VK_LEFT = 0x25
@@ -115,6 +93,19 @@ class GameControl:
             return struct.unpack("<I", data)[0]
         return None
 
+    def write_memory(self, address, data):
+        """Writes data to the process memory."""
+        if not self.process_handle: return False
+        bytes_written = ctypes.c_size_t()
+        return ctypes.windll.kernel32.WriteProcessMemory(
+            self.process_handle, address, data, len(data), ctypes.byref(bytes_written)
+        )
+
+    def write_int(self, address, value):
+        """Writes a 4-byte integer to the process memory."""
+        data = struct.pack("<I", value)
+        return self.write_memory(address, data)
+
     def get_game_state(self):
         """
         Returns indicator of the current menu/play state.
@@ -169,19 +160,21 @@ class GameControl:
             bullets.append(Bullet(*raw_vals))
         return bullets
 
-    def send_key(self, vk_code, duration=0.05):
+    def send_key(self, vk_code, duration=0.03):
         """Sends a key press event to the game window."""
         if not self.hwnd: return
-        ctypes.windll.user32.PostMessageW(self.hwnd, WM_KEYDOWN, vk_code, 0)
+        # Using SendMessage for more reliable input than PostMessage
+        # WM_KEYDOWN = 0x100, WM_KEYUP = 0x101
+        ctypes.windll.user32.SendMessageW(self.hwnd, 0x100, vk_code, 0)
         if duration > 0:
             time.sleep(duration)
-            ctypes.windll.user32.PostMessageW(self.hwnd, WM_KEYUP, vk_code, 0)
+            ctypes.windll.user32.SendMessageW(self.hwnd, 0x101, vk_code, 0)
 
-    def move_up(self): self.send_key(VK_UP)
-    def move_down(self): self.send_key(VK_DOWN)
-    def move_left(self): self.send_key(VK_LEFT)
-    def move_right(self): self.send_key(VK_RIGHT)
-    def press_enter(self): self.send_key(VK_RETURN)
+    def move_up(self): self.send_key(VK_UP, duration=0.03)
+    def move_down(self): self.send_key(VK_DOWN, duration=0.03)
+    def move_left(self): self.send_key(VK_LEFT, duration=0.03)
+    def move_right(self): self.send_key(VK_RIGHT, duration=0.03)
+    def press_enter(self): self.send_key(VK_RETURN, duration=0.1)
 
     def go_to_game(self):
         """Navigates from Title screen to the game."""
@@ -218,9 +211,10 @@ class GameControl:
             print("\nMonitoring stopped.")
 
 if __name__ == "__main__":
-    ctrl = GameControl()
-    if ctrl.launch_game():
-        # Example: start the game if at title
-        ctrl.go_to_game()
-        # Monitor
-        ctrl.monitor()
+    try:
+        from hijack_tools.player_ai import PlayerAI
+    except ImportError:
+        from player_ai import PlayerAI
+    
+    ai = PlayerAI()
+    ai.start()
