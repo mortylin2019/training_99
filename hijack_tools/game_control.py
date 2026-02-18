@@ -210,11 +210,15 @@ class GameControl:
         except KeyboardInterrupt:
             print("\nMonitoring stopped.")
 
+    def run_ai(self):
+        """Runs the AI avoidance logic."""
+        # ai_1: Repulsion Vector (Classical Logic)
+        # ai_2: 1/d^2 Safest Cell (Point-based Logic)
+        # ai_3: Oracle Simulation (Predictive Logic) - RECOMMENDED
+        from ai_3 import PlayerAI
+        ai = PlayerAI(self)
+        ai.start()
+
 if __name__ == "__main__":
-    try:
-        from hijack_tools.player_ai import PlayerAI
-    except ImportError:
-        from player_ai import PlayerAI
-    
-    ai = PlayerAI()
-    ai.start()
+    game = GameControl()
+    game.run_ai()

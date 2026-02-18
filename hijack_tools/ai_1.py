@@ -6,8 +6,9 @@ except ImportError:
     from hijack_tools.game_control import GameControl
 
 class PlayerAI:
-    def __init__(self):
-        self.game = GameControl()
+    def __init__(self, game_instance=None):
+        # Use existing game instance if provided, else create new one
+        self.game = game_instance if game_instance else GameControl()
         self.radius = 10
         self.step = 10
         self.safety_radius = 25 # Increased from 20
@@ -135,7 +136,3 @@ class PlayerAI:
         move_str = "".join(move_desc) if move_desc else "STAY"
         
         print(f"\r[FPS:{self.current_fps:>2.0f}] [B:{len(active_bullets):>3}] Pos:({px:>3},{py:>3}) | Move:{move_str:<5} | Pressure:{math.sqrt(rx*rx+ry*ry):>7.4f}   ", end="")
-
-if __name__ == "__main__":
-    ai = PlayerAI()
-    ai.start()
