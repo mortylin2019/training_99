@@ -129,39 +129,25 @@ class GameControl:
         return x_raw, y_raw
 
     def get_bullets(self):
-        """Reads bullet data from the entity array and returns a list of Bullet objects."""
-        count = self.read_int(ADDR_BULLET_COUNT)
-        if count is None: return []
-        if count > 300: count = 300 # Safety cap
+        """Reads the bullet/entity array using a single bulk memory read."""
+        # The game array is 300 slots of 15 bytes each. 
+        # Bulk reading is >100x faster than reading one by one.
+        total_size = 300 * ENTITY_SIZE
+        raw_data = self.read_memory(ADDR_ENTITY_ARRAY, total_size)
+        if not raw_data: return []
         
         bullets = []
-        for i in range(count):
-            addr = ADDR_ENTITY_ARRAY + (i * ENTITY_SIZE)
-            # Entity structure (15 bytes):
-            # 0-3: X (int)
-            # 4-7: Y (int)
-            # 8  : Slot status (0xFF = End/Free)
-            # 9  : active flag
-            # 10 : type (1: Homing, 2: Bounce, 3: Adv)
-            # 11 : timer
-            # 12 : index
-            # 13 : vx (int8)
-            # 14 : vy (int8)
-            data = self.read_memory(addr, 15)
-            if not data: continue
+        for i in range(300):
+            offset = i * ENTITY_SIZE
+            data = raw_data[offset:offset+ENTITY_SIZE]
             
-            # Extract raw values
-            # < = little-endian
-            # I = uint32 (raw_x)
-            # I = uint32 (raw_y)
-            # B = uint8 (status, active, type, timer, index)
-            # b = int8 (vx, vy)
-            raw_vals = struct.unpack("<IIBBBBBbb", data)
-            
-            # Check slot status (Offset 8)
-            if raw_vals[2] == 0xFF:
+            # Extract raw values: <IIBBBBBbb
+            # Offset 8 is raw_vals[2] which is the Slot status.
+            # We check data[8] directly for speed before unpacking.
+            if data[8] == 0xFF:
                 continue
                 
+            raw_vals = struct.unpack("<IIBBBBBbb", data)
             bullets.append(Bullet(*raw_vals))
         return bullets
 
@@ -227,9 +213,9 @@ class GameControl:
 
     def run_ai(self):
         """Runs the AI avoidance logic with state management and logging."""
-        # ai_3: Oracle Simulation (Predictive Logic) - RECOMMENDED
-        from ai_3 import PlayerAI
-        ai = PlayerAI(self)
+        # ai_4: Time-Space A* Pathfinding - MOST ROBUST
+        from ai_4 import TimeSpaceAStar
+        ai = TimeSpaceAStar(self)
         
         if not self.launch_game(): return
         
@@ -278,12 +264,25 @@ class GameControl:
                 # Active Gameplay Logic
                 if in_run and is_playing:
                     bullets = self.get_bullets()
-                    active_count = len([b for b in bullets if b.angle_index != 0xFF])
+                    
+                    # Count types
+                    types = {1: 0, 2: 0, 3: 0, 4: 0} # 1:Homing, 2:Bounce, 3+:Other
+                    active_count = 0
+                    for b in bullets:
+                        if b.angle_index != 0xFF:
+                            active_count += 1
+                            t = b.type if b.type in types else 4
+                            types[t] += 1
+                    
                     if active_count > max_bullets:
                         max_bullets = active_count
                         
+                    # Detailed type log every few frames
+                    if int(time.time() * 10) % 5 == 0:
+                        print(f"\r[Bullets] Homing:{types[1]} | Bounce:{types[2]} | Other:{types[3]+types[4]}    ", end="")
+
                     ai.perform_move()
-                    time.sleep(0.01)
+                    # Removed sleep to match game frame rate more closely
                 else:
                     time.sleep(0.1)
                     
