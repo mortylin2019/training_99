@@ -255,10 +255,17 @@ class GameControl:
                 # Check for run end
                 if in_run and (not is_playing or is_dead):
                     in_run = False
-                    frames = self.read_int(ADDR_GAME_TIME) or 0
+                    # ADDR_GAME_TIME is raw ticks during play and 
+                    # becomes total ms (ticks * multiplier) on death.
+                    raw_val = self.read_int(ADDR_GAME_TIME) or 0
                     multiplier = self.read_int(ADDR_SCORE_MULTIPLIER) or 16
-                    final_sec = (frames * multiplier) / 1000
-                    print(f"\n[RUN FINISHED] Time: {final_sec:.3f}s | Ticks: {frames} | Max Bullets: {max_bullets}")
+                    
+                    # Detection: if the raw value is already high, it's the score in ms.
+                    # We basically just want the time in seconds.
+                    final_sec = raw_val / 1000.0
+                    actual_ticks = int(raw_val / multiplier) if multiplier else 0
+                        
+                    print(f"\n[RUN FINISHED] Time: {final_sec:.3f}s | Ticks: {actual_ticks} | Max Bullets: {max_bullets}")
                     time.sleep(1.0) 
 
                 # Auto-navigation for menus (State machine based)

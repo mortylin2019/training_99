@@ -11,8 +11,8 @@ class PlayerAI:
         
         # Hyperparameters for the "Oracle" Logic
         self.sim_frames = 60      # 1.0s lookahead
-        self.safety_margin = 7    # Tightened from 10 to allow threading narrow gaps
-        self.move_speed = 4       # 4px per frame (verified from asm)
+        self.safety_margin = 0    # Using exact hitbox rect instead of margin
+        self.move_speed = 1       # VERIFIED from ASM: G_PlayerX = G_PlayerX + iVar3 (1px/f)
         
         self.last_latency = 0
 
@@ -25,15 +25,13 @@ class PlayerAI:
         total_ms = frames * multiplier
         
         active_bullets = [b for b in bullets if b.angle_index != 0xFF]
-        if not active_bullets:
-            self.game.write_int(0x00406d7c, 0)
-            return
-
+        
         # Candidate directions (8-way + STAY)
+        # Note: In most games, diagonal movement is 1px each way, not normalized.
         directions = {
             "STAY": (0, 0),
             "L": (-1, 0), "R": (1, 0), "U": (0, -1), "D": (0, 1),
-            "LU": (-0.71, -0.71), "LD": (-0.71, 0.71), "RU": (0.71, -0.71), "RD": (0.71, 0.71)
+            "LU": (-1, -1), "LD": (-1, 1), "RU": (1, -1), "RD": (1, 1)
         }
         bits_map = {
             "STAY": 0, "L": 1, "U": 2, "D": 4, "R": 8,
@@ -88,7 +86,7 @@ class PlayerAI:
                 px1 = px + (v1x * self.move_speed * f)
                 py1 = py + (v1y * self.move_speed * f)
                 
-                if px1 < 8 or px1 > 312 or py1 < 8 or py1 > 232:
+                if px1 < 4 or px1 > 316 or py1 < 4 or py1 > 396:
                     collision1 = True; break
                 
                 for b_states in bullet_predict:
@@ -126,7 +124,7 @@ class PlayerAI:
                     px2 = px1 + (v2x * self.move_speed * rel_f)
                     py2 = py1 + (v2y * self.move_speed * rel_f)
                     
-                    if px2 < 8 or px2 > 312 or py2 < 8 or py2 > 232:
+                    if px2 < 4 or px2 > 316 or py2 < 4 or py2 > 396:
                         collision2 = True; break
                     
                     for b_states in bullet_predict:
