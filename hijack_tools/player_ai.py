@@ -10,6 +10,12 @@ class PlayerAI:
         self.game = GameControl()
         self.radius = 10
         self.step = 10
+        self.safety_radius = 25 # Increased from 20
+        self.threat_gain = 100
+        self.fps_limit = 0.01 # Target ~100 FPS
+        self.last_time = time.time()
+        self.frame_count = 0
+        self.current_fps = 0
         
     def start(self):
         if not self.game.launch_game():
@@ -39,7 +45,17 @@ class PlayerAI:
 
                 if state == 1: # Playing
                     self.perform_move()
-                    time.sleep(0.01) # High frequency in play
+                    
+                    # FPS Calculation
+                    self.frame_count += 1
+                    now = time.time()
+                    elapsed = now - self.last_time
+                    if elapsed >= 1.0:
+                        self.current_fps = self.frame_count / elapsed
+                        self.frame_count = 0
+                        self.last_time = now
+                        
+                    time.sleep(self.fps_limit)
                 else:
                     # Clear input buffer when not playing
                     self.game.write_int(0x00406d7c, 0)
@@ -52,7 +68,7 @@ class PlayerAI:
         px, py = self.game.get_player_pos()
         bullets = self.game.get_bullets()
         
-        # Directions to test: (dx, dy)
+        # Directions: (dx, dy)
         directions = {
             "STAY": (0, 0),
             "UP": (0, -self.step),
@@ -62,48 +78,56 @@ class PlayerAI:
         }
         
         best_dir = "STAY"
-        min_score = 999999.0
+        min_score = float('inf')
         
-        # Use .active flag for better reliability
-        active_bullets = [b for b in bullets if b.active == 1]
+        # Filter active bullets. Based on RE, angle_index != 0xFF is the primary indicator.
+        # We'll use active > 0 as a secondary check if available.
+        active_bullets = [b for b in bullets if b.angle_index != 0xFF]
         
         for name, (dx, dy) in directions.items():
             tx, ty = px + dx, py + dy
             
             # Boundary check
-            if tx < 10 or tx > 300 or ty < 10 or ty > 220:
+            if tx < 5 or tx > 310 or ty < 5 or ty > 230:
                 continue
                 
-            threat = 0
+            threat_score = 0
             for b in active_bullets:
                 bx, by = b.x, b.y
-                # Prediction for bouncing bullets
-                if b.type == 2:
-                    bx += b.vx * 15
-                    by += b.vy * 15
                 
-                dist_sq = (tx - bx)**2 + (ty - by)**2
-                # Buffer of ~20 pixels
-                if dist_sq < 400:
-                    threat += 100
+                # Simple linear prediction for bouncing bullets
+                if b.type == 2:
+                    bx += b.vx * 10
+                    by += b.vy * 10
+                
+                dist = math.sqrt((tx - bx)**2 + (ty - by)**2)
+                
+                # COLLISION ZONE (Danger!)
+                if dist < 15:
+                    threat_score += 5000 / (dist + 1) # Exponentially bad
+                # CAUTION ZONE
+                elif dist < self.safety_radius:
+                    threat_score += (self.safety_radius - dist) * 10
             
-            # Weighted choice: stay near center-bottom and avoid unnecessary movement
-            center_dist = math.sqrt((tx - 152)**2 + (ty - 180)**2)
-            bias = center_dist / 20.0 # Weaker pull
-            move_penalty = 8.0 if name != "STAY" else 0.0 # Stronger penalty for moving
+            # Weighted bias: prefer center-bottom (152, 200)
+            target_x, target_y = 152, 200
+            center_dist = math.sqrt((tx - target_x)**2 + (ty - target_y)**2)
             
-            score = threat + bias + move_penalty
+            bias = center_dist / 10.0
+            move_penalty = 15.0 if name != "STAY" else 0.0
             
-            if score < min_score:
-                min_score = score
+            total_score = threat_score + bias + move_penalty
+            
+            if total_score < min_score:
+                min_score = total_score
                 best_dir = name
         
-        # Directly inject movement into G_InputState (0x00406d7c)
+        # Inject move
         input_map = {"STAY": 0, "LEFT": 1, "DOWN": 2, "UP": 4, "RIGHT": 8}
-        input_bits = input_map.get(best_dir, 0)
-        self.game.write_int(0x00406d7c, input_bits)
+        self.game.write_int(0x00406d7c, input_map.get(best_dir, 0))
         
-        print(f"\r[PI:{len(active_bullets):>3}] Pos:({px:>3},{py:>3}) | Move:{best_dir:<5} | Score:{int(min_score)}   ", end="")
+        # Debug output
+        print(f"\r[FPS:{self.current_fps:>2.0f}] [Bullets:{len(active_bullets):>3}] Pos:({px:>3},{py:>3}) | Move:{best_dir:<5} | Score:{int(min_score):>4}   ", end="")
 
 if __name__ == "__main__":
     ai = PlayerAI()
