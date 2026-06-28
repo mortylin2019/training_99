@@ -16,3 +16,4 @@ sim_reset
 sim_run_episode
 sim_run_episode_c
 sim_step
+sim_step_with_grid

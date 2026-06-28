@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <math.h>
 
 /* ── Constants (from config.py) ─────────────────────────── */
 #define SCR_W           304
@@ -615,6 +616,65 @@ EXPORT int sim_run_episode_c(GameState* s, int max_frames, float epsilon) {
         graze = s->active_near;
     }
     return max_frames;
+}
+
+/* ── Combined step + grid state (eliminates Python encode_state) ── */
+#define GRID_W 32
+#define GRID_H 24
+#define GRID_CH 4
+
+EXPORT int sim_step_with_grid(GameState* s, int input_bits, float* grid_out) {
+    int alive = sim_step(s, input_bits);
+
+    float cell_w = (float)SCR_W / GRID_W;
+    float cell_h = (float)SCR_H / GRID_H;
+    int total = GRID_CH * GRID_H * GRID_W;
+    for (int k = 0; k < total; k++) grid_out[k] = 0.0f;
+
+    /* Channel 0: bullet density */
+    float counts[GRID_H][GRID_W];
+    for (int gy = 0; gy < GRID_H; gy++)
+        for (int gx = 0; gx < GRID_W; gx++)
+            counts[gy][gx] = 0.0f;
+
+    for (int i = 0; i < s->bullet_count && i < MAX_ENTITIES; i++) {
+        Bullet *b = &s->bullets[i];
+        if (b->angle_index == INACTIVE) continue;
+        int bx = (b->raw_x >> RAW_SHIFT) - PIXEL_OFFSET;
+        int by = (b->raw_y >> RAW_SHIFT) - PIXEL_OFFSET;
+        int gx = (int)(bx / cell_w); if (gx < 0) gx = 0; if (gx >= GRID_W) gx = GRID_W - 1;
+        int gy = (int)(by / cell_h); if (gy < 0) gy = 0; if (gy >= GRID_H) gy = GRID_H - 1;
+        counts[gy][gx] += 1.0f;
+    }
+    for (int gy = 0; gy < GRID_H; gy++)
+        for (int gx = 0; gx < GRID_W; gx++) {
+            float d = counts[gy][gx] / 5.0f;
+            grid_out[gy * GRID_W + gx] = (d > 1.0f) ? 1.0f : d;
+        }
+
+    /* Channel 2: player position (Gaussian blob) */
+    int off2 = 2 * GRID_H * GRID_W;
+    float px_cell = s->px / cell_w, py_cell = s->py / cell_h;
+    for (int gy = 0; gy < GRID_H; gy++)
+        for (int gx = 0; gx < GRID_W; gx++) {
+            float dx = gx - px_cell, dy = gy - py_cell;
+            grid_out[off2 + gy * GRID_W + gx] = exp(-(dx*dx + dy*dy) / 2.0f);
+        }
+
+    /* Channel 3: wall proximity */
+    int off3 = 3 * GRID_H * GRID_W;
+    float wdx = GRID_W * 0.15f, wdy = GRID_H * 0.15f;
+    if (wdx < 1) wdx = 1; if (wdy < 1) wdy = 1;
+    for (int gy = 0; gy < GRID_H; gy++)
+        for (int gx = 0; gx < GRID_W; gx++) {
+            float dx = (gx < GRID_W - 1 - gx) ? gx : (GRID_W - 1 - gx);
+            float dy = (gy < GRID_H - 1 - gy) ? gy : (GRID_H - 1 - gy);
+            dx /= wdx; dy /= wdy;
+            float m = (dx < dy) ? dx : dy; if (m > 1.0f) m = 1.0f;
+            grid_out[off3 + gy * GRID_W + gx] = 1.0f - m;
+        }
+
+    return alive;
 }
 
 /* ── Batch episode runner (eliminates per-frame ctypes overhead) ── */

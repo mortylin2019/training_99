@@ -99,9 +99,9 @@ class RLAgent:
     """DQN with CNN, experience replay, target network, save/resume."""
 
     def __init__(self, n_actions=N_ACTIONS,
-                 lr=1e-3, gamma=0.99, epsilon=1.0, epsilon_min=0.02,
-                 epsilon_decay=0.997, buffer_size=50000, batch_size=128,
-                 target_update=500):
+                 lr=1e-3, gamma=0.99, epsilon=1.0, epsilon_min=0.05,
+                 epsilon_decay=0.9995, buffer_size=100000, batch_size=128,
+                 target_update=1000):
         self.n_actions = n_actions
         self.gamma = gamma
         self.epsilon = epsilon
@@ -213,8 +213,11 @@ def _collect_worker(args):
     ep_frames = []
     for ep in range(n_eps):
         cs = CSimulator(difficulty, seed_base + ep)
+        # First frame state via Python, then C handles rest
         state = encode_state(cs.px, cs.py, cs.get_visible_bullets())
+        grid_buf = np.zeros((N_CHANNELS, GRID_H, GRID_W), dtype=np.float32)
         frames = 0
+        prev_density = None
         for f in range(max_frames):
             if random.random() < epsilon:
                 action_idx = random.randint(0, N_ACTIONS - 1)
@@ -224,12 +227,20 @@ def _collect_worker(args):
                     action_idx = agent.q_net(s).argmax(dim=1).item()
 
             bits = int(BITS[action_idx])
-            alive, bullets = cs.step(bits)
-            next_state = encode_state(cs.px, cs.py, bullets)
+            # C computes grid state in-place — eliminates Python encode_state!
+            alive = cs.step_with_grid(bits, grid_buf)
+            # Channel 1 = previous density (motion cue)
+            if prev_density is None:
+                prev_density = state[0].copy()
+            grid_buf[1] = prev_density
+            prev_density = grid_buf[0].copy()
+            next_state = grid_buf.copy()
 
-            reward = 0.02
+            reward = 0.1  # stronger survival signal
             if not alive:
-                reward = -2.0 + f * 0.0005
+                reward = -5.0 + f * 0.001  # death penalty + survival bonus
+            else:
+                reward += f * 0.0001  # tiny increasing bonus per frame alive
 
             transitions.append((state, action_idx, reward, next_state, not alive))
             state = next_state

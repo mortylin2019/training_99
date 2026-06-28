@@ -45,6 +45,11 @@ _lib.sim_get_graze.restype = ctypes.c_int
 _lib.sim_get_frame.argtypes = [ctypes.c_void_p]
 _lib.sim_get_frame.restype = ctypes.c_int
 
+# ── Combined step + grid state (fast path for RL) ────────────
+_lib.sim_step_with_grid.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                      ctypes.POINTER(ctypes.c_float)]
+_lib.sim_step_with_grid.restype = ctypes.c_int
+
 # ── C inference engine ──────────────────────────────────────
 _lib.sim_load_weights.argtypes = [ctypes.POINTER(ctypes.c_float), ctypes.c_int]
 _lib.sim_load_weights.restype = None
@@ -135,7 +140,6 @@ class CSimulator:
         """Return list of Bullet objects for active bullets."""
         result = []
         x, y, t, a, vx, vy = (ctypes.c_int() for _ in range(6))
-        # Iterate all slots (up to bullet_count), filter active
         max_slots = _lib.sim_get_bullet_count(self._ptr) + 50
         for i in range(min(max_slots, 300)):
             _lib.sim_get_bullet(self._ptr, i, ctypes.byref(x), ctypes.byref(y),
@@ -146,6 +150,17 @@ class CSimulator:
             result.append(Bullet(x=x.value, y=y.value, type=t.value,
                                  angle_index=a.value, vx=vx.value, vy=vy.value))
         return result
+
+    def step_with_grid(self, input_bits, grid_out):
+        """
+        One sim step + compute grid state in C (eliminates Python encode_state).
+        grid_out: numpy (4, 24, 32) float32 array, filled in-place.
+        Returns alive (bool).
+        """
+        alive = _lib.sim_step_with_grid(
+            self._ptr, input_bits,
+            grid_out.ctypes.data_as(ctypes.POINTER(ctypes.c_float)))
+        return bool(alive)
 
     def run_episode(self, ai, max_frames=8000):
         """
