@@ -28,3 +28,20 @@ ACCEL_TABLE_FULL = [
     (73,-30,0),(76,-23,0),(78,-15,0),(79,-7,0),
 ]
 ACCEL_TABLE = [(vx,vy) for vx,vy,_ in ACCEL_TABLE_FULL]
+
+# Flat numpy arrays for @njit indexed access (avoids Python tuple overhead)
+import numpy as np
+_VEL_FLAT = []
+for vx, vy, _ in VEL_TABLE_FULL:
+    _VEL_FLAT.extend([vx, vy])
+VEL_TABLE_FLAT = np.array(_VEL_FLAT, dtype=np.int32)
+
+_ACCEL_FLAT = []
+for vx, vy, _ in ACCEL_TABLE_FULL:
+    _ACCEL_FLAT.extend([vx, vy])
+ACCEL_TABLE_FLAT = np.array(_ACCEL_FLAT, dtype=np.int32)
+
+_VEL_FULL_FLAT = []
+for vx, vy, t in VEL_TABLE_FULL:
+    _VEL_FULL_FLAT.extend([vx, vy, t])
+VEL_TABLE_FULL_FLAT = np.array(_VEL_FULL_FLAT, dtype=np.int32)

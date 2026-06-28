@@ -32,76 +32,40 @@ class Bullet:
 def move_bullet(b: Bullet, player_x: int, player_y: int, rng):
     """
     Move one bullet matching FUN_00402fbc type-specific branches.
+    Uses @njit-accelerated functions from jit_core for hot paths.
     Modifies bullet in-place.
     rng: LCG instance (FUN_00402000) for homing phase jitter.
     """
+    from .jit_core import (move_type0, move_type3, move_type2_haccel,
+                           move_type1_homing)
+    from .tables import VEL_TABLE_FLAT, ACCEL_TABLE_FLAT, VEL_TABLE_FULL_FLAT
+
     if b.type == TYPE_HOMING:
-        # Type 1: Homing (C: cVar1 == '\x01')
-        b.counter += 1
-        if b.counter >= b.timer:
-            # Re-aim: FUN_00402d68(ECX, 3) with spread=HOMING_RESPREAD
-            # C: counter = RNG & 7 (phase jitter), NOT counter = 0
-            b.counter = rng.next() & HOMING_PHASE_MASK
-
-            # Assembly-verified octant search for homing re-target (spread=3)
-            from .functions import compute_aimed_angle
-            rng_state = rng.state
-            rng_state, target = compute_aimed_angle(
-                b.raw_x, b.raw_y, player_x, player_y, rng_state, HOMING_RESPREAD)
-            rng.state = rng_state
-
-            cur = b.angle_index
-            if target != cur:
-                if target < cur:
-                    cur = (cur - 0x40) & 0xFF
-                diff = (target - cur) & 0xFF
-                if diff < STEER_NEAR:       # < 25: steer +1 toward target
-                    b.angle_index = (b.angle_index + 1) & (NUM_ANGLES - 1)
-                elif diff < STEER_LOSE:     # < 40: lost lock → fall back to Normal
-                    b.type = TYPE_NORMAL
-                else:                        # >= 40: steer -1 toward target
-                    b.angle_index = (b.angle_index - 1) & (NUM_ANGLES - 1)
-
-        # Movement (C: LAB_0040326e — velocity table lookup)
-        idx = b.angle_index & (NUM_ANGLES - 1)
-        vx, vy = VEL_TABLE[idx]
-        b.raw_x += vx
-        b.raw_y += vy
+        # Type 1: Homing — delegate to @njit function
+        new_raw_x, new_raw_y, new_angle, new_counter, new_rng_state = \
+            move_type1_homing(
+                b.raw_x, b.raw_y, b.angle_index, b.counter, b.timer,
+                VEL_TABLE_FLAT, rng.state,
+                int(player_x), int(player_y),
+                VEL_TABLE_FULL_FLAT)
+        b.raw_x = new_raw_x
+        b.raw_y = new_raw_y
+        b.angle_index = new_angle
+        b.counter = new_counter
+        rng.state = new_rng_state
 
     elif b.type == TYPE_H_ACCEL:
-        # Type 2: Homing-Acceleration (C: cVar1 == '\x02')
-        # Compare pixel positions (C: iVar11 vs DAT_00406d6c+6)
-        bx = b.x
-        by = b.y
-        tx = player_x + PLAYER_CENTER
-        ty = player_y + PLAYER_CENTER
-
-        if bx < tx:
-            if b.vx < VX_CAP:
-                b.vx += 1
-        elif b.vx > -VX_CAP:
-            b.vx -= 1
-
-        if by < ty:
-            if b.vy < VY_CAP:
-                b.vy += 1
-        elif b.vy > -VY_CAP:
-            b.vy -= 1
-
-        b.raw_x += b.vx
-        b.raw_y += b.vy
+        # Type 2: Homing-Acceleration
+        b.raw_x, b.raw_y, b.vx, b.vy = move_type2_haccel(
+            b.raw_x, b.raw_y, b.vx, b.vy,
+            int(player_x), int(player_y))
 
     elif b.type == TYPE_ACCEL:
-        # Type 3: Accelerating (C: cVar1 == '\x03')
-        # Uses ACCEL_TABLE at 0x00406074 (64 entries × 12 bytes)
-        idx = b.angle_index & (NUM_ANGLES - 1)
-        vx, vy = ACCEL_TABLE[idx]
-        b.raw_x += vx
-        b.raw_y += vy
+        # Type 3: Accelerating
+        b.raw_x, b.raw_y = move_type3(
+            b.raw_x, b.raw_y, b.angle_index, ACCEL_TABLE_FLAT)
 
     else:
-        # Type 0: Normal (C: falls through to LAB_0040326e)
-        idx = b.angle_index & (NUM_ANGLES - 1)
-        vx, vy = VEL_TABLE[idx]
-        b.raw_x += vx
-        b.raw_y += vy
+        # Type 0: Normal
+        b.raw_x, b.raw_y = move_type0(
+            b.raw_x, b.raw_y, b.angle_index, VEL_TABLE_FLAT)

@@ -28,6 +28,10 @@ def _load_ai(name):
         try: from ai_direct import SuperiorAI
         except ImportError: from hijack_tools.ai_direct import SuperiorAI
         return SuperiorAI
+    if name == "ai_rl":
+        try: from ai_rl import RLAgent
+        except ImportError: from hijack_tools.ai_rl import RLAgent
+        return RLAgent
     raise ValueError(f"Unknown AI: {name}")
 
 
