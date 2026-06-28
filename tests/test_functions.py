@@ -54,29 +54,28 @@ def test_rng_seeded():
 # ═══════════════════════════════════════════════════════════════
 
 def test_aimed_angle_cardinal():
-    """Test aimed angle from 4 cardinal directions, spread=0 (perfect aim)."""
-    player = (152, 44)  # start position
+    """Test aimed angle from 4 cardinal directions (assembly-verified octant search)."""
+    player = (152, 44)
 
-    # Bullet left of player → should aim RIGHT (angle 0)
-    _, angle = compute_aimed_angle(0, 44 * 64,  # raw_y = 44*64 = 2816
+    # Bullet left of player → assembly gives 2 (not atan2's 0!)
+    _, angle = compute_aimed_angle(0, 44 * 64,
                                     player[0], player[1], 0, spread=0)
-    assert angle == 0, f"Left→Right: expected 0, got {angle}"
+    assert angle == 2, f"Left→Right: assembly gives 2, got {angle}"
 
-    # atan2-based aiming (within ±1 of C octant search)
-    # Bullet right of player → should aim LEFT (index ~31-32)
+    # Bullet right of player → assembly octant=0x18, search gives 31
     _, angle = compute_aimed_angle(300 * 64, 44 * 64,
                                     player[0], player[1], 0, spread=0)
-    assert angle in (31, 32), f"Right→Left: expected ~31-32, got {angle}"
+    assert angle == 31, f"Right→Left: assembly gives 31, got {angle}"
 
-    # Bullet above player → should aim DOWN (index ~14-16)
+    # Bullet above player → assembly octant=8, search gives 15
     _, angle = compute_aimed_angle(152 * 64, 0,
                                     player[0], player[1], 0, spread=0)
-    assert 13 <= angle <= 17, f"Top→Down: expected ~14-16, got {angle}"
+    assert angle == 15, f"Top→Down: assembly gives 15, got {angle}"
 
-    # Bullet below player → should aim UP (index ~48)
+    # Bullet below player → assembly octant=0x30, divisor=dx, search gives 55
     _, angle = compute_aimed_angle(152 * 64, 200 * 64,
                                     player[0], player[1], 0, spread=0)
-    assert angle in (48, 49), f"Bottom→Up: expected ~48, got {angle}"
+    assert angle == 55, f"Bottom→Up: assembly gives 55, got {angle}"
 
     print("  Aimed angle cardinals: OK")
 
@@ -91,10 +90,8 @@ def test_aimed_angle_spread():
         _, angle = compute_aimed_angle(0, 44 * 64,
                                         player[0], player[1], state, spread=5)
         angles.add(angle)
-        # With spread=5: formula idx' = (idx + jit + 1 - 2) = (idx + jit - 1)
-        # jit 0-4 → range [idx-1, idx, idx+1, idx+2, idx+3]
-        # For idx near 0: range includes 63,0,1,2,3,4
-        assert angle in (60, 61, 62, 63, 0, 1, 2, 3, 4), f"Spread out of range: {angle}"
+        # spread=5: range = [angle-1, angle+3]. For angle near 0: {63,0,1,2,3,4,5}
+        assert angle in (60, 61, 62, 63, 0, 1, 2, 3, 4, 5), f"Spread out of range: {angle}"
 
     assert len(angles) >= 3, f"Spread should produce multiple angles, got {angles}"
     print(f"  Aimed angle spread=5: {len(angles)} distinct angles OK")

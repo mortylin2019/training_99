@@ -29,22 +29,104 @@ def rng_next(state):
 def compute_aimed_angle(bullet_raw_x, bullet_raw_y, player_px, player_py,
                         rng_state, spread):
     """
-    FUN_00402d68 equivalent — aimed angle toward player+PLAYER_CENTER.
-    Uses atan2 (mathematically equivalent to C octant search within ±1 angle).
+    FUN_00402d68 — EXACT assembly-equivalent (register-verified from binary).
+
+    Assembly trace:
+      ecx=dx, esi=dy
+      bl=octant_base (0,8,0x10,0x18,0x20,0x28,0x30,0x38)
+      Octant search with tan_ratio from VEL_TABLE_FULL
+      inc ebx after each improvement → off-by-one in final angle
+      Spread: (angle + RNG%spread + 1 - spread/2) & 0x3F
 
     Returns: (new_rng_state, angle_index_0_63)
     """
-    import math
-    tx = player_px + PLAYER_CENTER
-    ty = player_py + PLAYER_CENTER
-    bx = bullet_raw_x >> RAW_SHIFT
-    by = bullet_raw_y >> RAW_SHIFT
-    ang = math.atan2(ty - by, tx - bx) % (2 * math.pi)
-    idx = int(ang * NUM_ANGLES / (2 * math.pi)) & (NUM_ANGLES - 1)
+    from .tables import VEL_TABLE_FULL
+
+    # dx = (player_x+6) - (bullet_raw_x>>6)
+    # dy = (player_y+6) - (bullet_raw_y>>6)
+    dx = (player_px + PLAYER_CENTER) - (bullet_raw_x >> RAW_SHIFT)
+    dy = (player_py + PLAYER_CENTER) - (bullet_raw_y >> RAW_SHIFT)
+
+    # Octant determination (exact assembly branches)
+    # esi=dy, ecx=dx
+    if dx < 0:
+        if dy <= 0:
+            if dy < dx:  # esi < ecx (both negative, esi more negative) → octant 0x20
+                octant = 0x20
+                divisor = dy
+            else:         # octant 0x28
+                octant = 0x28
+                divisor = 0  # will skip search (check_zero)
+        else:  # dy > 0
+            if dx < -dy:  # ecx < -esi → octant 0x18
+                octant = 0x18
+                divisor = dy  # dy is the smaller magnitude
+            else:          # octant 0x10
+                octant = 0x10
+                divisor = dy
+    elif dy < 0:
+        if dx < -dy:      # ecx < -esi → octant 0x30
+            octant = 0x30
+            divisor = dx  # dx is the smaller magnitude
+        else:              # octant 0x38
+            octant = 0x38
+            divisor = 0  # skip search
+    else:  # dx >= 0, dy >= 0
+        if dx == 0:
+            octant = 0x10
+            divisor = 0  # skip
+        elif dy == 0:
+            octant = 0
+            divisor = 0  # skip
+        elif dy < dx:     # esi < ecx → octant 0
+            octant = 0
+            divisor = dy
+        else:              # octant 8
+            octant = 8
+            divisor = dy
+
+    # Angle starts at octant_base (ebx = bl = octant)
+    if divisor == 0:
+        angle = octant & 0xFF  # check_zero: skip search
+    else:
+        # idiv: (dx*0x400) / dy → abs result
+        quotient = (dx * 0x400) // divisor
+        if quotient < 0:
+            quotient = -quotient
+
+        # Search loop (esi=counter, ebx=angle, edx=table_ptr)
+        best_diff = 0x10000
+        entry_idx = octant & 0xFF
+        angle = octant & 0xFF
+        counter = 0
+
+        while counter < OCTANT_SEARCH:
+            vx, vy, tan_ratio = VEL_TABLE_FULL[entry_idx % NUM_ANGLES]
+
+            if vy == 0:
+                diff = 0xFFFF   # worst score
+            else:
+                # abs(quotient - tan_ratio)
+                if quotient <= tan_ratio:
+                    diff = tan_ratio - quotient
+                else:
+                    diff = quotient - tan_ratio
+
+            # jge → break if diff >= best_diff
+            if diff >= best_diff:
+                break
+
+            best_diff = diff
+            entry_idx += 1
+            angle = (octant + counter + 1) & 0xFF  # inc ebx equivalent
+            counter += 1
+
+    # Spread jitter (assembly: idiv [esp], add bl + RNG%spread + 1 - spread/2)
     if spread:
         rng_state, rv = rng_next(rng_state)
-        idx = (idx + (rv % spread) + 1 - (spread >> 1)) & (NUM_ANGLES - 1)
-    return rng_state, idx
+        angle = (angle + (rv % spread) + 1 - (spread >> 1)) & 0x3F
+
+    return rng_state, angle & 0x3F
 
 
 # ═══════════════════════════════════════════════════════════════

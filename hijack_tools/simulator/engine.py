@@ -46,17 +46,15 @@ class GameSimulator:
 
     # ── FUN_00402d68: Compute aimed angle ─────────────────
     def _aimed_angle(self, bullet_raw_x, bullet_raw_y, spread):
-        """FUN_00402d68 — aimed angle toward player+PLAYER_CENTER with spread jitter.
-        Uses atan2 (mathematically equivalent to C octant search within ±1 index)."""
-        tx = self.px + PLAYER_CENTER
-        ty = self.py + PLAYER_CENTER
-        bx = bullet_raw_x >> RAW_SHIFT
-        by = bullet_raw_y >> RAW_SHIFT
-        ang = math.atan2(ty - by, tx - bx) % (2 * math.pi)
-        idx = int(ang * NUM_ANGLES / (2 * math.pi)) & (NUM_ANGLES - 1)
-        if spread:
-            idx = (idx + (self.rng.next() % spread) + 1 - (spread >> 1)) & (NUM_ANGLES - 1)
-        return idx
+        """FUN_00402d68 — EXACT assembly-verified octant search."""
+        from .functions import compute_aimed_angle
+        # Use engine's RNG state (extract from LCG object)
+        rng_state = self.rng.state
+        rng_state, angle = compute_aimed_angle(
+            bullet_raw_x, bullet_raw_y, self.px, self.py,
+            rng_state, spread)
+        self.rng.state = rng_state
+        return angle
 
     # ── FUN_00402e88: Spawn one bullet ────────────────────
     def _spawn_at(self, slot):

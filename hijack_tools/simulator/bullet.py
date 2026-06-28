@@ -43,16 +43,12 @@ def move_bullet(b: Bullet, player_x: int, player_y: int, rng):
             # C: counter = RNG & 7 (phase jitter), NOT counter = 0
             b.counter = rng.next() & HOMING_PHASE_MASK
 
-            bx = b.raw_x >> RAW_SHIFT
-            by = b.raw_y >> RAW_SHIFT
-            tx = player_x + PLAYER_CENTER
-            ty = player_y + PLAYER_CENTER
-            ang = math.atan2(ty - by, tx - bx)
-            ang = ang % (2 * math.pi)  # normalize to [0, 2π)
-            target = int(ang * (NUM_ANGLES / (2 * math.pi))) & (NUM_ANGLES - 1)
-            # Spread jitter for re-target
-            jitter = rng.next() % HOMING_RESPREAD
-            target = (target + jitter + 1 - (HOMING_RESPREAD >> 1)) & (NUM_ANGLES - 1)
+            # Assembly-verified octant search for homing re-target (spread=3)
+            from .functions import compute_aimed_angle
+            rng_state = rng.state
+            rng_state, target = compute_aimed_angle(
+                b.raw_x, b.raw_y, player_x, player_y, rng_state, HOMING_RESPREAD)
+            rng.state = rng_state
 
             cur = b.angle_index
             if target != cur:
