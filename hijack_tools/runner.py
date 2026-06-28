@@ -106,8 +106,8 @@ def run(ai_name="ai_direct", max_runs=10):
                     logger.debug(f"Screen: {screen_names.get(state, state)}")
                     last_screen = state
 
-                game.navigate_menu()
-                time.sleep(0.15)  # let game process the message
+                game.press_enter()
+                time.sleep(0.15)
                 continue
 
             # ── Gameplay ──

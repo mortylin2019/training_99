@@ -1,21 +1,29 @@
+"""
+game_control.py — Pure memory I/O layer for 99.exe process hijack.
+
+Provides:
+  - Process launch, attach, cleanup
+  - Memory read/write (ReadProcessMemory / WriteProcessMemory)
+  - Game state readers (player pos, bullets, patterns, timing, etc.)
+  - Velocity table readers
+  - Window detection (EnumWindows by PID)
+  - Input: keybd_event for menu navigation
+
+NO game loop, NO AI logic, NO logging configuration here.
+"""
+
 import ctypes
 import time
 import subprocess
-import os
 import struct
-import sys
 from loguru import logger
+
 try:
     from bullet_data import Bullet
     import keyboard as kbd
 except ImportError:
     from hijack_tools.bullet_data import Bullet
     import hijack_tools.keyboard as kbd
-
-# Configure Logging
-logger.remove() # Remove default handler
-logger.add(sys.stderr, level="INFO") # Only show important info/errors in console
-logger.add("logs/game_ai.log", rotation="10 MB", retention="5 days", compression="zip", enqueue=True, backtrace=True, diagnose=True, level="DEBUG")
 
 # Windows Constants
 PROCESS_ALL_ACCESS = 0x1F0FFF
@@ -501,16 +509,6 @@ class GameControl:
             ctypes.windll.user32.keybd_event(vk_code, 0, KEYEVENTF_KEYUP, 0)
 
     def press_enter(self): self.send_key(VK_RETURN, duration=0.1)
-
-    def navigate_menu(self):
-        """
-        Navigate menu screens. Uses PostMessage(WM_KEYDOWN VK_RETURN)
-        because after death the game blocks on WaitMessage() and does
-        NOT read G_InputState. PostMessage queues a real Windows
-        message, which wakes WaitMessage() and gets dispatched by
-        the game's PeekMessage loop.
-        """
-        self.send_key(VK_RETURN, duration=0.1)
 
     def cleanup(self):
         """Kills the game process if it is running."""
