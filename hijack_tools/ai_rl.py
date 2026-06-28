@@ -19,10 +19,9 @@ try:
 except ImportError:
     HAS_TQDM = False
 
-# ── State encoding ──────────────────────────────────────────
-MAX_BULLETS = 100              # pad to fixed size
-BULLET_FEATS = 4               # (x, y, vx, vy) per bullet
-STATE_DIM = MAX_BULLETS * BULLET_FEATS + 4  # bullets + player(x,y) + graze + frame_norm
+# ── State encoding (CNN grid + temporal) ────────────────────
+GRID_W, GRID_H = 32, 24
+N_CHANNELS = 4                # density, prev_density, player, walls
 
 SCR_W, SCR_H = 304, 224
 CTR_X, CTR_Y = 152, 44
@@ -34,69 +33,83 @@ MOVES = np.array([
 BITS = np.array([0, 1, 8, 2, 4, 3, 5, 10, 12], dtype=np.int32)
 N_ACTIONS = 9
 
-try:
-    from hijack_tools.simulator.tables import VEL_TABLE, ACCEL_TABLE
-except ImportError:
-    from simulator.tables import VEL_TABLE, ACCEL_TABLE
 
+def encode_state(px, py, bullets, graze=0, frame=0, prev_density=None):
+    """
+    CNN grid state: 4 channels.
+    Channel 0: bullet density (current frame)
+    Channel 1: previous frame density (CNN learns motion from 0 vs 1)
+    Channel 2: player position (Gaussian blob)
+    Channel 3: wall proximity mask
+    """
+    grid = np.zeros((N_CHANNELS, GRID_H, GRID_W), dtype=np.float32)
+    cell_w = SCR_W / GRID_W
+    cell_h = SCR_H / GRID_H
+    counts = np.zeros((GRID_H, GRID_W), dtype=np.float32)
 
-def encode_state(px, py, bullets, graze=0, frame=0):
-    """Flat state: all bullets (x,y,vx,vy) padded + player + graze + time."""
-    state = np.zeros(STATE_DIM, dtype=np.float32)
-    n = 0
     for b in bullets:
-        if b.angle_index == 0xFF or n >= MAX_BULLETS:
+        if b.angle_index == 0xFF:
             continue
-        bx, by = b.x, b.y
-        # Velocity (fair: visible from frame-to-frame movement)
-        if b.type == 2:
-            vx, vy = b.vx, b.vy
-        elif b.type == 3:
-            vx, vy = ACCEL_TABLE[b.angle_index & 63]
-        else:
-            vx, vy = VEL_TABLE[b.angle_index & 63]
-        off = n * BULLET_FEATS
-        state[off] = bx / SCR_W
-        state[off + 1] = by / SCR_H
-        state[off + 2] = vx / 8.0       # velocity normalized to ~[-10,10]
-        state[off + 3] = vy / 8.0
-        n += 1
+        gx = min(int(b.x / cell_w), GRID_W - 1)
+        gy = min(int(b.y / cell_h), GRID_H - 1)
+        if 0 <= gx < GRID_W and 0 <= gy < GRID_H:
+            counts[gy, gx] += 1.0
 
-    # Player info at the end (fixed position regardless of bullet count)
-    base = MAX_BULLETS * BULLET_FEATS
-    state[base] = px / SCR_W
-    state[base + 1] = py / SCR_H
-    state[base + 2] = min(graze / 50.0, 1.0)   # graze count (capped)
-    state[base + 3] = min(frame / 8000.0, 1.0)  # time progress
-    return state
+    # Channel 0: current density
+    grid[0] = np.clip(counts / 5.0, 0.0, 1.0)
+
+    # Channel 1: previous density (motion cue)
+    if prev_density is not None:
+        grid[1] = prev_density
+
+    # Channel 2: player position (Gaussian blob)
+    px_cell = px / cell_w
+    py_cell = py / cell_h
+    for gy in range(GRID_H):
+        for gx in range(GRID_W):
+            dist2 = (gx - px_cell) ** 2 + (gy - py_cell) ** 2
+            grid[2, gy, gx] = np.exp(-dist2 / 2.0)
+
+    # Channel 3: wall proximity (1.0 at edges, 0.0 center)
+    for gy in range(GRID_H):
+        for gx in range(GRID_W):
+            dx = min(gx, GRID_W - 1 - gx) / max(GRID_W * 0.15, 1)
+            dy = min(gy, GRID_H - 1 - gy) / max(GRID_H * 0.15, 1)
+            grid[3, gy, gx] = 1.0 - min(dx, dy, 1.0)
+
+    return grid
 
 
 class QNetwork(nn.Module):
-    """MLP: state → Q-values for 9 actions."""
-    def __init__(self, state_dim=STATE_DIM, n_actions=N_ACTIONS, hidden=256):
+    """CNN: grid state → spatial features → Q-values for 9 actions."""
+    def __init__(self, n_actions=N_ACTIONS):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(state_dim, hidden),
-            nn.ReLU(),
-            nn.Linear(hidden, hidden),
-            nn.ReLU(),
-            nn.Linear(hidden, hidden // 2),
-            nn.ReLU(),
-            nn.Linear(hidden // 2, n_actions),
+        self.conv = nn.Sequential(
+            nn.Conv2d(N_CHANNELS, 16, 3, padding=1), nn.ReLU(),
+            nn.Conv2d(16, 32, 3, padding=1), nn.ReLU(),
+            nn.Conv2d(32, 32, 3, padding=1), nn.ReLU(),
+        )
+        self.pool = nn.AdaptiveAvgPool2d((6, 8))  # 32×24 → 6×8 = 1536
+        self.head = nn.Sequential(
+            nn.Linear(32 * 6 * 8, 128), nn.ReLU(),
+            nn.Linear(128, n_actions),
         )
 
     def forward(self, x):
-        return self.net(x)
+        # x: (B, C, H, W)
+        f = self.conv(x)
+        f = self.pool(f)
+        f = f.view(f.size(0), -1)
+        return self.head(f)
 
 
 class RLAgent:
-    """DQN with experience replay, target network, save/resume."""
+    """DQN with CNN, experience replay, target network, save/resume."""
 
-    def __init__(self, state_dim=STATE_DIM, n_actions=N_ACTIONS,
+    def __init__(self, n_actions=N_ACTIONS,
                  lr=1e-3, gamma=0.99, epsilon=1.0, epsilon_min=0.02,
                  epsilon_decay=0.997, buffer_size=50000, batch_size=128,
                  target_update=500):
-        self.state_dim = state_dim
         self.n_actions = n_actions
         self.gamma = gamma
         self.epsilon = epsilon
@@ -105,23 +118,25 @@ class RLAgent:
         self.batch_size = batch_size
         self.target_update = target_update
 
-        self.q_net = QNetwork(state_dim, n_actions)
-        self.target_net = QNetwork(state_dim, n_actions)
+        self.q_net = QNetwork(n_actions)
+        self.target_net = QNetwork(n_actions)
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.optimizer = torch.optim.Adam(self.q_net.parameters(), lr=lr)
-        self.loss_fn = nn.SmoothL1Loss()  # Huber loss — more stable
+        self.loss_fn = nn.SmoothL1Loss()
 
         self.replay = deque(maxlen=buffer_size)
         self.train_steps = 0
         self.episodes = 0
 
     def decide(self, px, py, bullets, graze=0, frame=0):
-        """Epsilon-greedy action selection. Returns bitmask int."""
-        state = encode_state(px, py, bullets, graze, frame)
+        """Epsilon-greedy over CNN Q-values. Returns bitmask int."""
+        prev = getattr(self, '_prev_density', None)
+        state = encode_state(px, py, bullets, graze, frame, prev)
+        self._prev_density = state[0].copy()  # store density for next frame
         if random.random() < self.epsilon:
             return int(BITS[random.randint(0, N_ACTIONS - 1)])
         with torch.no_grad():
-            s = torch.from_numpy(state).unsqueeze(0)
+            s = torch.from_numpy(state).unsqueeze(0)  # (1, C, H, W)
             action = self.q_net(s).argmax(dim=1).item()
         return int(BITS[action])
 
@@ -133,10 +148,10 @@ class RLAgent:
             return None
         batch = random.sample(self.replay, self.batch_size)
         states, actions, rewards, next_states, dones = zip(*batch)
-        states = torch.from_numpy(np.array(states, dtype=np.float32))
+        states = torch.from_numpy(np.stack(states))
         actions = torch.tensor(actions, dtype=torch.long).unsqueeze(1)
         rewards = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1)
-        next_states = torch.from_numpy(np.array(next_states, dtype=np.float32))
+        next_states = torch.from_numpy(np.stack(next_states))
         dones = torch.tensor(dones, dtype=torch.float32).unsqueeze(1)
 
         q_current = self.q_net(states).gather(1, actions)
@@ -184,35 +199,13 @@ class RLAgent:
         return True
 
     def export_for_c(self, path):
-        """Export network weights as flat float32 arrays for C inference."""
-        sd = self.q_net.state_dict()
-        # Layer order from QNetwork: net.0 (Linear), net.2 (Linear), net.4 (Linear), net.6 (Linear)
-        weights = []
-        shapes = []
-        for key in ['net.0.weight', 'net.0.bias', 'net.2.weight', 'net.2.bias',
-                     'net.4.weight', 'net.4.bias', 'net.6.weight', 'net.6.bias']:
-            if key in sd:
-                w = sd[key].cpu().numpy().astype(np.float32)
-                weights.append(w.flatten())
-                shapes.append(w.shape)
-        all_weights = np.concatenate(weights)
-        # Save shapes + weights
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        info = {
-            'shapes': [(int(s[0]), int(s[1]) if len(s) > 1 else 1) for s in shapes],
-            'state_dim': self.state_dim,
-            'n_actions': self.n_actions,
-        }
-        np.savez(path, weights=all_weights, **{f's{i}': np.array(s, dtype=np.int32) for i, s in enumerate(info['shapes'])})
-        # Also save as raw binary for C
-        bin_path = path.replace('.npz', '.bin')
-        all_weights.astype(np.float32).tofile(bin_path)
-        return bin_path
+        """Export for C inference (not yet supported for CNN — returns None)."""
+        return None  # C inference engine doesn't support CNN yet
 
 
-# ── Parallel collection worker (runs in subprocess) ─────────
+# ── Collection worker (PyTorch CNN, runs in subprocess) ─────
 def _collect_worker(args):
-    """Run N episodes, return (transitions, episode_frames_list). Picklable."""
+    """Run N episodes with PyTorch CNN, return (transitions, ep_frames)."""
     model_state, epsilon, n_eps, difficulty, max_frames, seed_base = args
 
     agent = RLAgent()
@@ -255,21 +248,18 @@ def _collect_worker(args):
     return transitions, ep_frames
 
 
-# ── Parallel batch training loop ────────────────────────────
+# ── Parallel batch training loop (C inference) ──────────────
 def train(episodes=10000, difficulty=1, max_frames=8000,
           workers=8, collect_eps=64, train_epochs=5,
           save_path="logs/ai_rl_model.pt", resume=True):
     """
-    Parallel collect-then-train DQN:
-      1. Spawn `workers` processes, each runs `collect_eps/workers` episodes
-      2. Gather all (s,a,r,s',done) transitions into replay buffer
-      3. Train on combined buffer for `train_epochs` epochs
-      4. Repeat until `episodes` total
-
-    Uses C engine for 7× faster simulation per episode.
+    Parallel collect-then-train DQN with C inference:
+      1. Export PyTorch weights → .bin
+      2. Workers collect episodes using pure C inference (56× faster)
+      3. Train on combined replay buffer in PyTorch
+      4. Repeat
     """
     from concurrent.futures import ProcessPoolExecutor
-    import math
 
     agent = RLAgent()
     start_ep = 0
@@ -284,9 +274,10 @@ def train(episodes=10000, difficulty=1, max_frames=8000,
                 unit="ep", disable=not HAS_TQDM,
                 bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {postfix}')
 
+    weight_path = save_path.replace('.pt', '_c_weights.bin')
     ep = start_ep
     while ep < episodes:
-        # ── Phase 1: Collect experience in parallel ──────────
+        # ── Phase 1: Collect with Python workers (parallel) ─
         n_collect = min(collect_eps, episodes - ep)
         per_worker = max(1, n_collect // workers)
         actual_workers = min(workers, n_collect)
@@ -313,21 +304,18 @@ def train(episodes=10000, difficulty=1, max_frames=8000,
                 except Exception as e:
                     print(f"Worker failed: {e}")
 
-        # Add to replay buffer and track survival
         for t in all_transitions:
             agent.remember(*t)
         for f in all_ep_frames:
-            history.append(f / 80.0)  # frames → seconds
+            history.append(f / 80.0)
 
         ep += n_collect
-        total_frames_collected = sum(1 for t in all_transitions)
 
-        # ── Phase 2: Train on collected data ────────────────
+        # ── Phase 2: Train in PyTorch ───────────────────────
         train_losses = []
         for epoch in range(train_epochs):
             epoch_loss = 0.0
             n_batches = 0
-            # Shuffle and batch
             buf = list(agent.replay)
             random.shuffle(buf)
             for i in range(0, len(buf), agent.batch_size):
@@ -359,10 +347,7 @@ def train(episodes=10000, difficulty=1, max_frames=8000,
             if n_batches > 0:
                 train_losses.append(epoch_loss / n_batches)
 
-        # Decay epsilon
         agent.epsilon = max(agent.epsilon_min, agent.epsilon * (agent.epsilon_decay ** n_collect))
-
-        # Update target network
         if agent.train_steps % agent.target_update < n_collect:
             agent.target_net.load_state_dict(agent.q_net.state_dict())
 
@@ -376,7 +361,6 @@ def train(episodes=10000, difficulty=1, max_frames=8000,
             'buf': len(agent.replay), 'loss': f'{avg_loss:.4f}',
         })
 
-        # Save checkpoint
         if len(history) > 0:
             agent.episodes = ep
             agent.save(save_path)

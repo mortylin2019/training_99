@@ -486,6 +486,7 @@ static float c_b3[C_H3];
 static float c_w4[C_H3 * C_N_ACTIONS];
 static float c_b4[C_N_ACTIONS];
 static int c_weights_loaded = 0;
+static int c_bits_map[9] = {0, 1, 8, 2, 4, 3, 5, 10, 12};
 
 EXPORT void sim_load_weights(const float *data, int len) {
     /* data layout: w1, b1, w2, b2, w3, b3, w4, b4 */
@@ -550,6 +551,10 @@ static int c_inference(const float *state) {
         }
     }
     return best_a;
+}
+
+EXPORT int sim_inference(const float *state) {
+    return c_inference(state);
 }
 
 /* ── C inference episode runner (zero Python callbacks) ──── */
