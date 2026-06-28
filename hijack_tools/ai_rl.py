@@ -20,9 +20,9 @@ except ImportError:
     HAS_TQDM = False
 
 # ── State encoding ──────────────────────────────────────────
-GRID_W, GRID_H = 24, 18       # finer grid (~12.7×12.4 px per cell)
-N_NEAREST = 10                # closest bullet coords to include
-STATE_DIM = GRID_W * GRID_H + N_NEAREST * 2 + 2  # grid + nearest bullets + player
+MAX_BULLETS = 100              # pad to fixed size
+BULLET_FEATS = 4               # (x, y, vx, vy) per bullet
+STATE_DIM = MAX_BULLETS * BULLET_FEATS + 4  # bullets + player(x,y) + graze + frame_norm
 
 SCR_W, SCR_H = 304, 224
 CTR_X, CTR_Y = 152, 44
@@ -34,37 +34,41 @@ MOVES = np.array([
 BITS = np.array([0, 1, 8, 2, 4, 3, 5, 10, 12], dtype=np.int32)
 N_ACTIONS = 9
 
+try:
+    from hijack_tools.simulator.tables import VEL_TABLE, ACCEL_TABLE
+except ImportError:
+    from simulator.tables import VEL_TABLE, ACCEL_TABLE
 
-def encode_state(px, py, bullets):
-    """Rich state: density grid + nearest bullet coords + player position."""
-    grid = np.zeros((GRID_H, GRID_W), dtype=np.float32)
-    cell_w = SCR_W / GRID_W
-    cell_h = SCR_H / GRID_H
-    active = [(b.x, b.y) for b in bullets if b.angle_index != 0xFF]
-    coords = []
-    for bx, by in active:
-        gx = min(int(bx / cell_w), GRID_W - 1)
-        gy = min(int(by / cell_h), GRID_H - 1)
-        if 0 <= gx < GRID_W and 0 <= gy < GRID_H:
-            grid[gy, gx] += 1.0
-        coords.append((bx, by))
-    grid = np.clip(grid / 5.0, 0.0, 1.0)
-    if coords:
-        coords.sort(key=lambda c: (c[0]-px)**2 + (c[1]-py)**2)
-        nearest = coords[:N_NEAREST]
-    else:
-        nearest = []
-    while len(nearest) < N_NEAREST:
-        nearest.append((0, 0))
-    nearest_flat = []
-    for bx, by in nearest:
-        nearest_flat.extend([bx / SCR_W, by / SCR_H])
-    state = np.concatenate([
-        grid.flatten(),
-        np.array(nearest_flat, dtype=np.float32),
-        np.array([px / SCR_W, py / SCR_H], dtype=np.float32)
-    ])
-    return state.astype(np.float32)
+
+def encode_state(px, py, bullets, graze=0, frame=0):
+    """Flat state: all bullets (x,y,vx,vy) padded + player + graze + time."""
+    state = np.zeros(STATE_DIM, dtype=np.float32)
+    n = 0
+    for b in bullets:
+        if b.angle_index == 0xFF or n >= MAX_BULLETS:
+            continue
+        bx, by = b.x, b.y
+        # Velocity (fair: visible from frame-to-frame movement)
+        if b.type == 2:
+            vx, vy = b.vx, b.vy
+        elif b.type == 3:
+            vx, vy = ACCEL_TABLE[b.angle_index & 63]
+        else:
+            vx, vy = VEL_TABLE[b.angle_index & 63]
+        off = n * BULLET_FEATS
+        state[off] = bx / SCR_W
+        state[off + 1] = by / SCR_H
+        state[off + 2] = vx / 8.0       # velocity normalized to ~[-10,10]
+        state[off + 3] = vy / 8.0
+        n += 1
+
+    # Player info at the end (fixed position regardless of bullet count)
+    base = MAX_BULLETS * BULLET_FEATS
+    state[base] = px / SCR_W
+    state[base + 1] = py / SCR_H
+    state[base + 2] = min(graze / 50.0, 1.0)   # graze count (capped)
+    state[base + 3] = min(frame / 8000.0, 1.0)  # time progress
+    return state
 
 
 class QNetwork(nn.Module):
@@ -111,9 +115,9 @@ class RLAgent:
         self.train_steps = 0
         self.episodes = 0
 
-    def decide(self, px, py, bullets):
+    def decide(self, px, py, bullets, graze=0, frame=0):
         """Epsilon-greedy action selection. Returns bitmask int."""
-        state = encode_state(px, py, bullets)
+        state = encode_state(px, py, bullets, graze, frame)
         if random.random() < self.epsilon:
             return int(BITS[random.randint(0, N_ACTIONS - 1)])
         with torch.no_grad():
@@ -210,7 +214,8 @@ def train(episodes=1000, difficulty=1, max_frames=8000,
     for ep in pbar:
         sim.reset()
         sim.rng.seed(ep * 12345 + 789)
-        state = encode_state(sim.px, sim.py, sim.get_visible_bullets())
+        state = encode_state(sim.px, sim.py, sim.get_visible_bullets(),
+                             sim.active_near, 0)
         steps = 0
         ep_loss = 0.0
         total_reward = 0.0
@@ -225,7 +230,8 @@ def train(episodes=1000, difficulty=1, max_frames=8000,
 
             bits = int(BITS[action_idx])
             alive, bullets = sim.step(bits)
-            next_state = encode_state(sim.px, sim.py, bullets)
+            next_state = encode_state(sim.px, sim.py, bullets,
+                                      sim.active_near, steps + 1)
 
             reward = 0.02
             if sim.active_near > 0:
