@@ -10,6 +10,8 @@ sim_get_frame
 sim_get_graze
 sim_get_player
 sim_get_rng
+sim_load_weights
 sim_reset
 sim_run_episode
+sim_run_episode_c
 sim_step

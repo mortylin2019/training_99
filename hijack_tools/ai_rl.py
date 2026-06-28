@@ -183,6 +183,32 @@ class RLAgent:
         self.train_steps = ckpt.get('train_steps', 0)
         return True
 
+    def export_for_c(self, path):
+        """Export network weights as flat float32 arrays for C inference."""
+        sd = self.q_net.state_dict()
+        # Layer order from QNetwork: net.0 (Linear), net.2 (Linear), net.4 (Linear), net.6 (Linear)
+        weights = []
+        shapes = []
+        for key in ['net.0.weight', 'net.0.bias', 'net.2.weight', 'net.2.bias',
+                     'net.4.weight', 'net.4.bias', 'net.6.weight', 'net.6.bias']:
+            if key in sd:
+                w = sd[key].cpu().numpy().astype(np.float32)
+                weights.append(w.flatten())
+                shapes.append(w.shape)
+        all_weights = np.concatenate(weights)
+        # Save shapes + weights
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        info = {
+            'shapes': [(int(s[0]), int(s[1]) if len(s) > 1 else 1) for s in shapes],
+            'state_dim': self.state_dim,
+            'n_actions': self.n_actions,
+        }
+        np.savez(path, weights=all_weights, **{f's{i}': np.array(s, dtype=np.int32) for i, s in enumerate(info['shapes'])})
+        # Also save as raw binary for C
+        bin_path = path.replace('.npz', '.bin')
+        all_weights.astype(np.float32).tofile(bin_path)
+        return bin_path
+
 
 # ── Parallel collection worker (runs in subprocess) ─────────
 def _collect_worker(args):

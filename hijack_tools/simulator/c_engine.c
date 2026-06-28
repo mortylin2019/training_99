@@ -466,6 +466,152 @@ EXPORT int sim_get_frame(GameState* s) { return s->frame; }
 EXPORT int sim_get_bullet_size(void) { return sizeof(Bullet); }
 EXPORT unsigned int sim_get_rng(GameState* s) { return s->rng_state; }
 
+/* ═══════════════════════════════════════════════════════════
+ * C INFERENCE ENGINE — runs trained PyTorch model in pure C
+ * Network: 404→256→256→128→9 (ReLU hidden, linear output)
+ * ═══════════════════════════════════════════════════════════ */
+
+#define C_STATE_DIM  404
+#define C_N_ACTIONS  9
+#define C_H1         256
+#define C_H2         256
+#define C_H3         128
+
+static float c_w1[C_STATE_DIM * C_H1];
+static float c_b1[C_H1];
+static float c_w2[C_H1 * C_H2];
+static float c_b2[C_H2];
+static float c_w3[C_H2 * C_H3];
+static float c_b3[C_H3];
+static float c_w4[C_H3 * C_N_ACTIONS];
+static float c_b4[C_N_ACTIONS];
+static int c_weights_loaded = 0;
+
+EXPORT void sim_load_weights(const float *data, int len) {
+    /* data layout: w1, b1, w2, b2, w3, b3, w4, b4 */
+    int off = 0;
+    int s1 = C_STATE_DIM * C_H1;     memcpy(c_w1, data + off, s1 * 4); off += s1;
+    int s2 = C_H1;                   memcpy(c_b1, data + off, s2 * 4); off += s2;
+    int s3 = C_H1 * C_H2;            memcpy(c_w2, data + off, s3 * 4); off += s3;
+    int s4 = C_H2;                   memcpy(c_b2, data + off, s4 * 4); off += s4;
+    int s5 = C_H2 * C_H3;            memcpy(c_w3, data + off, s5 * 4); off += s5;
+    int s6 = C_H3;                   memcpy(c_b3, data + off, s6 * 4); off += s6;
+    int s7 = C_H3 * C_N_ACTIONS;     memcpy(c_w4, data + off, s7 * 4); off += s7;
+    int s8 = C_N_ACTIONS;            memcpy(c_b4, data + off, s8 * 4); off += s8;
+    c_weights_loaded = 1;
+}
+
+static void c_relu(float *x, int n) {
+    for (int i = 0; i < n; i++)
+        if (x[i] < 0) x[i] = 0;
+}
+
+static int c_inference(const float *state) {
+    /* Layer 1: h1 = relu(state @ w1 + b1) */
+    float h1[C_H1];
+    for (int i = 0; i < C_H1; i++) {
+        float sum = c_b1[i];
+        for (int j = 0; j < C_STATE_DIM; j++)
+            sum += state[j] * c_w1[j * C_H1 + i];
+        h1[i] = sum;
+    }
+    c_relu(h1, C_H1);
+
+    /* Layer 2: h2 = relu(h1 @ w2 + b2) */
+    float h2[C_H2];
+    for (int i = 0; i < C_H2; i++) {
+        float sum = c_b2[i];
+        for (int j = 0; j < C_H1; j++)
+            sum += h1[j] * c_w2[j * C_H2 + i];
+        h2[i] = sum;
+    }
+    c_relu(h2, C_H2);
+
+    /* Layer 3: h3 = relu(h2 @ w3 + b3) */
+    float h3[C_H3];
+    for (int i = 0; i < C_H3; i++) {
+        float sum = c_b3[i];
+        for (int j = 0; j < C_H2; j++)
+            sum += h2[j] * c_w3[j * C_H3 + i];
+        h3[i] = sum;
+    }
+    c_relu(h3, C_H3);
+
+    /* Layer 4: q = h3 @ w4 + b4 → argmax */
+    float best_q = c_b4[0];
+    int best_a = 0;
+    for (int i = 0; i < C_N_ACTIONS; i++) {
+        float sum = c_b4[i];
+        for (int j = 0; j < C_H3; j++)
+            sum += h3[j] * c_w4[j * C_N_ACTIONS + i];
+        if (i == 0 || sum > best_q) {
+            best_q = sum;
+            best_a = i;
+        }
+    }
+    return best_a;
+}
+
+/* ── C inference episode runner (zero Python callbacks) ──── */
+EXPORT int sim_run_episode_c(GameState* s, int max_frames, float epsilon) {
+    if (!c_weights_loaded) return -1;
+    reset_state(s);
+
+    int bits_map[9] = {0, 1, 8, 2, 4, 3, 5, 10, 12};
+    int graze = 0;
+
+    for (int f = 0; f < max_frames; f++) {
+        /* Build state vector (same as Python encode_state) */
+        float state[C_STATE_DIM];
+        for (int k = 0; k < C_STATE_DIM; k++) state[k] = 0.0f;
+
+        int n = 0;
+        int base = 0;  /* bullet features start at 0 */
+        for (int i = 0; i < s->bullet_count && i < MAX_ENTITIES && n < 100; i++) {
+            Bullet *b = &s->bullets[i];
+            if (b->angle_index == INACTIVE) continue;
+            int bx = (b->raw_x >> RAW_SHIFT) - PIXEL_OFFSET;
+            int by = (b->raw_y >> RAW_SHIFT) - PIXEL_OFFSET;
+            int vx = 0, vy = 0;
+            if (b->type == TYPE_H_ACCEL) { vx = b->vx; vy = b->vy; }
+            else if (b->type == TYPE_ACCEL) {
+                int idx = b->angle_index & 63;
+                vx = ACCEL_TABLE[idx][0]; vy = ACCEL_TABLE[idx][1];
+            } else {
+                int idx = b->angle_index & 63;
+                vx = VEL_TABLE[idx][0]; vy = VEL_TABLE[idx][1];
+            }
+            int off = n * 4;
+            state[off]     = bx / 304.0f;
+            state[off + 1] = by / 224.0f;
+            state[off + 2] = vx / 8.0f;
+            state[off + 3] = vy / 8.0f;
+            n++;
+        }
+
+        /* Player info at end */
+        int base_p = 100 * 4;
+        state[base_p]     = s->px / 304.0f;
+        state[base_p + 1] = s->py / 224.0f;
+        state[base_p + 2] = (graze < 50 ? graze / 50.0f : 1.0f);
+        state[base_p + 3] = (f < 8000 ? f / 8000.0f : 1.0f);
+
+        /* Epsilon-greedy action */
+        int action;
+        if (((rng_next(&s->rng_state) & 0x7FFF) / 32767.0f) < epsilon) {
+            action = rng_next(&s->rng_state) % C_N_ACTIONS;
+        } else {
+            action = c_inference(state);
+        }
+
+        int bits = bits_map[action];
+        if (!sim_step(s, bits))
+            return f;
+        graze = s->active_near;
+    }
+    return max_frames;
+}
+
 /* ── Batch episode runner (eliminates per-frame ctypes overhead) ── */
 EXPORT int sim_run_episode(GameState* s, int max_frames,
     int (*ai_callback)(int px, int py, int n,

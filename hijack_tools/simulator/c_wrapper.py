@@ -45,6 +45,13 @@ _lib.sim_get_graze.restype = ctypes.c_int
 _lib.sim_get_frame.argtypes = [ctypes.c_void_p]
 _lib.sim_get_frame.restype = ctypes.c_int
 
+# ── C inference engine ──────────────────────────────────────
+_lib.sim_load_weights.argtypes = [ctypes.POINTER(ctypes.c_float), ctypes.c_int]
+_lib.sim_load_weights.restype = None
+
+_lib.sim_run_episode_c.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_float]
+_lib.sim_run_episode_c.restype = ctypes.c_int
+
 # ── Batch episode callback type ─────────────────────────────
 AI_CALLBACK = ctypes.CFUNCTYPE(
     ctypes.c_int,  # return: input bits
@@ -163,3 +170,23 @@ class CSimulator:
             return bits
 
         return _lib.sim_run_episode(self._ptr, max_frames, _cb)
+
+
+def load_weights_to_c(bin_path):
+    """Load exported .bin weights into the C inference engine."""
+    import numpy as np
+    weights = np.fromfile(bin_path, dtype=np.float32)
+    _lib.sim_load_weights(
+        weights.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+        len(weights))
+    return len(weights)
+
+
+def run_episode_c(c_sim, max_frames=8000, epsilon=0.0):
+    """
+    Run one episode with pure C inference (zero Python callbacks).
+    Requires sim_load_weights() to have been called first.
+    epsilon: exploration rate (0.0 = pure greedy, 1.0 = pure random)
+    Returns frames survived.
+    """
+    return _lib.sim_run_episode_c(c_sim._ptr, max_frames, ctypes.c_float(epsilon))
