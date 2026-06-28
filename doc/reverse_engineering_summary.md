@@ -36,11 +36,11 @@ The primary goal was to reconstruct the gameplay logic and extract the authentic
 ## Extracted Game Data
 
 ### Difficulty Levels
-Reversed from `FUN_00404660`:
-- **Level 1 (Easy):** 30 Bullets
-- **Level 2 (Normal):** 50 Bullets (Default)
-- **Level 3 (Hard):** 100 Bullets
-- **Level 4 (Lunatic):** 200 Bullets
+Reversed from `Game_Init` (`FUN_00404660`):
+- **Easy (0):** 30 Bullets (0x1E)
+- **Normal (1):** 50 Bullets (0x32, default)
+- **Hard (2):** 100 Bullets
+- **Lunatic (3):** 200 Bullets
 
 ### Ranking System (Top 5)
 1. **180s+**: 愛の人勢いのある (Person of Love, Full of Momentum)
@@ -50,11 +50,9 @@ Reversed from `FUN_00404660`:
 5. **8.0s+**: 便所掃除と認定する。 (Certified as: Toilet Cleaner)
 
 ## Tools
-A unified extraction tool is available at:
-`c:\git\training_99\tools\reverse_data.py`
+Extraction tool: `tools/reverse_data.py`
 
-Usage:
 ```bash
 python tools/reverse_data.py
 ```
-This script reads the hex dump, validates the "Toilet Cleaning" key, and generates `rankings.json` for the web remake.
+Reads the hex dump, validates against known text, and generates `doc/game_ranking.json` + `doc/game_ranking_dump.txt`.

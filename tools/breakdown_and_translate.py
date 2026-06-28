@@ -6,7 +6,7 @@ import csv
 SOURCE_FILE = r"c:\git\training_99\reverse_engineering_ref\decompiled\99.exe.c"
 STRING_DUMP_FILE = r"c:\git\training_99\reverse_engineering_ref\decompiled\004063e4_hex"
 MANUAL_STRINGS_FILE = r"c:\git\training_99\reverse_engineering_ref\decompiled\manual_strings.csv" # New CSV file
-OUTPUT_DIR = r"c:\git\training_99\reverse_engineering_ref\python_breakdown"
+OUTPUT_DIR = r"c:\git\training_99\reverse_engineering_ref"
 
 # Base address for the string dump
 STRING_BASE_ADDRESS = 0x004063e4

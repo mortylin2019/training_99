@@ -1,31 +1,26 @@
 # Entity Management and Logic
 
 ## Overview
-Based on the analysis of `Stage2_GameEntityLoop.c` and `Bullet_Mechanics.c`, the game uses a fixed array of entity structures.
+Based on `Stage2_GameEntityLoop.c` and `Bullet_Mechanics.c`. The game uses a fixed array of 300 entity structures at `0x00406e10`.
 
 ## Entity Array Logic
-- **Fixed Size**: The game iterates through an array of entities using an index (0 to 299).
-- **Active Limit**: `G_CurrentBulletCount` controls how many entities in the array are currently "active" (rendering and updating).
-- **Respawn on Death**: 
-  - Unlike modern engines that destroy and create objects, this game **recycles** slots immediately.
-  - When an entity goes out of bounds (coordinates `>= 0x5101` or `>= 0x3d01`), the game logic falls into the `else` block.
-  - It calls `Entity_SpawnBullet()`, which re-initializes the *current* slot with new random coordinates and type.
-  - **There is no "remove" logic**. The count `G_CurrentBulletCount` only *increases* (via the spawn timer logic at the top of the loop). It never decreases during gameplay.
+- **Fixed Size**: 300 slots, each 15 bytes (0x0F). Iterated as `ptr += 0x0F`.
+- **Active Limit**: `G_CurrentBulletCount` controls the loop boundary — entities beyond this index are not processed. This count starts at the difficulty level (30/50/100/200) and only increases when new bullets spawn.
+- **Recycle on Death**: 
+  - When an entity goes out of bounds (raw_x ≥ 0x5101 or raw_y ≥ 0x3D01), the game calls `Entity_SpawnBullet()` to re-initialize the slot in-place.
+  - There is no explicit removal — slots are recycled immediately.
+  - `G_CurrentBulletCount` never decreases during gameplay; it only increments via the spawn timer.
 
-## Type 2 (Bouncing/Pattern 7) Exception
-- There is a special counter `DAT_00406dac` (likely "Active Bouncers").
-- If a bullet with specific flags/type (checked via `(*(byte *)((int)local_2c + 10) & 2) != 0`) goes out of bounds:
-  - It decrements `DAT_00406dac--`.
-  - It *still* calls `Entity_SpawnBullet()` to recycle the slot, potentially becoming a different type.
-
-## Implications for Remake
-- The remake's `entities` array logic (delete and re-spawn) mimics the C logic functionally with simpler JS idioms.
-- **Critical Fix**: The previous remake had a bug where newly spawned Type 2 entities (Bouncing) would immediately bounce off the screen edge and fly away, creating an empty screen but high entity count. This was fixed by checking velocity direction before bouncing.
+## Type 2 (Pattern 7 — Homing Acceleration)
+- Counter `DAT_00406dac` (at `0x00406dac`) limits Type 2 bullets to 4 on screen.
+- When a Type 2 bullet goes out of bounds: decrements `DAT_00406dac`, recycles the slot.
+- Pattern 7 stops spawning Type 2 once the limit is hit.
 
 ## Spawning Logic
-- `Entity_SpawnBullet` sets coordinates to 0 or Max (screen edges).
-- Types are randomly assigned:
-  - 0: Pattern 0
-  - 1: Pattern 1 (Homing?)
-  - 2: Pattern 2 (Bounce?)
-  - 3: Pattern 3 (Accel?)
+- `Entity_SpawnBullet`: initializes slot with edge position + type/angle from active pattern
+- Types are determined by `G_NextBulletPattern`, NOT random per bullet:
+  - Pattern 0: Type 0 (Normal), random angle
+  - Pattern 1: Type 0 (Normal)
+  - Pattern 2–5: Type 1 (Homing), varying timers
+  - Pattern 6: Type 3 (Accelerating)
+  - Pattern 7: Type 2 (Homing-Accel), max 4

@@ -13,8 +13,7 @@ This is a **reverse engineering project** for **特訓９９ (Training 99)**, a 
 | Directory | Purpose |
 |---|---|
 | `reverse_engineering_ref/` | Decompiled C code (Ghidra output), memory maps, string tables |
-| `reverse_engineering_ref/decompiled/` | Raw `99.exe.c`, hex dumps, manual string overrides |
-| `reverse_engineering_ref/python_breakdown/` | Refactored C modules split by game stage |
+| `reverse_engineering_ref/decompiled/` | Raw `99.exe.c` (3113 lines, 78KB), hex dumps, manual string overrides |
 | `reverse_engineering_ref/resources/` | Extracted icons, version info |
 | `doc/` | Human-readable analysis: game logic, entities, state machine, ranking |
 | `hijack_tools/` | Python bots that attach to the **live game process** and play |
@@ -187,7 +186,7 @@ There are three ways to control the player, from worst to best:
 ## Important Notes for AI Assistants
 
 - The original game binary is **32-bit Windows**, compiled with what appears to be an older C compiler (possibly Visual C++ 6 or similar).
-- The decompiled C code in `reverse_engineering_ref/python_breakdown/` has been manually cleaned up and annotated — it's the canonical reference for game logic.
+- The decompiled C code in `reverse_engineering_ref/decompiled/99.exe.c` (3113 lines) is the canonical reference for game logic. It's short enough to read directly.
 - `doc/game_logic.md` is the authoritative documentation of game mechanics.
 - The hijack tools require the **actual game binary** (`raw/99.exe`) running on Windows. They will not work without it.
 - Ranking data is XOR-encrypted with `0xFF` in the hex dump.

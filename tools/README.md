@@ -1,43 +1,43 @@
 # Reverse Engineering Tools
 
-This directory contains the primary scripts used for analyzing `99.exe` and generating the project assets.
+Tools for analyzing `99.exe` and extracting its data.
 
 ## Core Tools
 
-### 1. `breakdown_and_translate.py`
-**Purpose**: The main reverse engineering utility.
-- **Input**: 
-  - `reverse_engineering_ref/decompiled/99.exe.c` (Raw decompiled C)
-  - `reverse_engineering_ref/decompiled/004063e4_hex` (String data dump)
-  - `reverse_engineering_ref/decompiled/manual_strings.csv` (Manual overrides)
-- **Output**: 
-  - `reverse_engineering_ref/python_breakdown/*.c` (Refactored C files)
-- **Features**:
-  - Splits the monolithic C file into logical modules (e.g., `Stage1_StartScreen.c`).
-  - Decodes Shift-JIS strings from the hex dump and inserts them as comments inline.
-  - Applies manual string overrides for better readability.
-  - Translates function and variable names based on a predefined symbol map.
+### `extract_strings.py`
+**Extract ALL strings and ranking data from the hex dump.**
 
-### 2. `reverse_data.py`
-**Purpose**: Extract ranking data from the game hex dump.
-- **Input**:
-  - `reverse_engineering_ref/decompiled/004063e4_hex`
+- **Input**: `reverse_engineering_ref/decompiled/004063e4_hex` (memory dump of string pool at `0x004063e4`)
 - **Output**:
-  - `doc/game_ranking.json` (Ranking data in JSON)
-  - `doc/game_ranking_dump.txt` (Human readable dump)
+  - `doc/game_strings.txt` — all 90+ extracted strings with indices
+  - `doc/game_ranking.json` — 52 ranking entries as JSON
+  - `doc/game_ranking_dump.txt` — human-readable ranking table
 - **Features**:
-  - Parses the game's internal ranking table (starting at offset 959).
-  - Decrypts the XOR-obfuscated data.
-  - Exports the data in JSON format.
+  - Splits Shift-JIS string pool by 0xFF separators
+  - XOR-decrypts ranking table (key 0xFF)
+  - Maps ranking entry string IDs to decoded text
+
+### `reverse_data.py`
+~~Legacy ranking extractor~~ — removed. Use `extract_strings.py` instead.
+
+### `dump_table.py`
+**Live memory reader** — attaches to running `99.exe` process and dumps the velocity lookup tables (`0x00405d74`, `0x00406074`).
+
+### `breakdown_and_translate.py`
+**C code refactoring utility** — splits the decompiled `99.exe.c` into logical modules with Shift-JIS annotations and symbol renaming.
+
+### `convert_icon.py`
+**Icon converter** — extracts `.ico` from resources and converts to `.png`.
 
 ## Usage
 
-To regenerate the C code breakdown:
 ```bash
-uv run tools/breakdown_and_translate.py
-```
+# Extract all strings and ranking data
+python tools/extract_strings.py
 
-To extract ranking data:
-```bash
-uv run tools/reverse_data.py
+# Dump velocity tables from running game
+python tools/dump_table.py
+
+# Refactor and annotate decompiled C code
+python tools/breakdown_and_translate.py
 ```

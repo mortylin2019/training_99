@@ -1,0 +1,418 @@
+[
+  {
+    "threshold_ms": 180000,
+    "threshold_s": 180.0,
+    "prefix1": "偉大なる",
+    "prefix2": "あなたを",
+    "title": "愛の人",
+    "suffix": "勢いのある"
+  },
+  {
+    "threshold_ms": 175000,
+    "threshold_s": 175.0,
+    "prefix1": "盟約により",
+    "prefix2": "あなたを",
+    "title": "愛の人",
+    "suffix": "勢いのある"
+  },
+  {
+    "threshold_ms": 170000,
+    "threshold_s": 170.0,
+    "prefix1": "盟約により",
+    "prefix2": "あなたを",
+    "title": "奇跡の人",
+    "suffix": "勢いのある"
+  },
+  {
+    "threshold_ms": 165000,
+    "threshold_s": 165.0,
+    "prefix1": "フレッシュな",
+    "prefix2": "あなたを",
+    "title": "ナマモノ",
+    "suffix": "勢いのある"
+  },
+  {
+    "threshold_ms": 160000,
+    "threshold_s": 160.0,
+    "prefix1": "ささりたい",
+    "prefix2": "あなたを",
+    "title": "ナマモノ",
+    "suffix": "勢いのある"
+  },
+  {
+    "threshold_ms": 157000,
+    "threshold_s": 157.0,
+    "prefix1": "COOL!な",
+    "prefix2": "と見なして銃殺刑。",
+    "title": "",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 155000,
+    "threshold_s": 155.0,
+    "prefix1": "ささりたい",
+    "prefix2": "あなたを",
+    "title": "クダモノ",
+    "suffix": "勢いのある"
+  },
+  {
+    "threshold_ms": 150000,
+    "threshold_s": 150.0,
+    "prefix1": "ささりたい",
+    "prefix2": "あなたを",
+    "title": "アレ",
+    "suffix": "勢いのある"
+  },
+  {
+    "threshold_ms": 145000,
+    "threshold_s": 145.0,
+    "prefix1": "まあアレだ、",
+    "prefix2": "あなたを",
+    "title": "ケダモノ",
+    "suffix": "以上。"
+  },
+  {
+    "threshold_ms": 140000,
+    "threshold_s": 140.0,
+    "prefix1": "ま、",
+    "prefix2": "あなたを",
+    "title": "ケダモノ",
+    "suffix": "以上。"
+  },
+  {
+    "threshold_ms": 135000,
+    "threshold_s": 135.0,
+    "prefix1": "ま、",
+    "prefix2": "あなたを",
+    "title": "paranoia",
+    "suffix": "以上。"
+  },
+  {
+    "threshold_ms": 130000,
+    "threshold_s": 130.0,
+    "prefix1": "みだれちゃってる",
+    "prefix2": "あなたを",
+    "title": "究極超人",
+    "suffix": "以上。"
+  },
+  {
+    "threshold_ms": 125000,
+    "threshold_s": 125.0,
+    "prefix1": "思いつきだけど",
+    "prefix2": "いやぁんな",
+    "title": "究極超人",
+    "suffix": "愛の狩人"
+  },
+  {
+    "threshold_ms": 120000,
+    "threshold_s": 120.0,
+    "prefix1": "無敵な",
+    "prefix2": "いやぁんな",
+    "title": "バケモノ",
+    "suffix": "勢いのある"
+  },
+  {
+    "threshold_ms": 115000,
+    "threshold_s": 115.0,
+    "prefix1": "ステキな",
+    "prefix2": "あなたを",
+    "title": "漢",
+    "suffix": "以上。"
+  },
+  {
+    "threshold_ms": 110000,
+    "threshold_s": 110.0,
+    "prefix1": "MANIACな",
+    "prefix2": "あなたを",
+    "title": "宇宙からの使者",
+    "suffix": "以上。"
+  },
+  {
+    "threshold_ms": 105000,
+    "threshold_s": 105.0,
+    "prefix1": "MANIACな",
+    "prefix2": "あなたを",
+    "title": "嵐を呼ぶ男",
+    "suffix": "以上。"
+  },
+  {
+    "threshold_ms": 100000,
+    "threshold_s": 100.0,
+    "prefix1": "cuteな",
+    "prefix2": "と見なして銃殺刑。",
+    "title": "達人",
+    "suffix": "以上。"
+  },
+  {
+    "threshold_ms": 95000,
+    "threshold_s": 95.0,
+    "prefix1": "cuteな",
+    "prefix2": "と見なして銃殺刑。",
+    "title": "ナイスガイ",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 90000,
+    "threshold_s": 90.0,
+    "prefix1": "cuteな",
+    "prefix2": "と見なして銃殺刑。",
+    "title": "マシィーン",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 85000,
+    "threshold_s": 85.0,
+    "prefix1": "COOL!な",
+    "prefix2": "と見なして銃殺刑。",
+    "title": "マシィーン",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 80000,
+    "threshold_s": 80.0,
+    "prefix1": "絆だから",
+    "prefix2": "と見なして銃殺刑。",
+    "title": "ファーストチルドレン",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 75000,
+    "threshold_s": 75.0,
+    "prefix1": "存在感のない",
+    "prefix2": "と見なして銃殺刑。",
+    "title": "ファーストチルドレン",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 70000,
+    "threshold_s": 70.0,
+    "prefix1": "ムキムキの",
+    "prefix2": "と見なして銃殺刑。",
+    "title": "兄貴",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 65000,
+    "threshold_s": 65.0,
+    "prefix1": "",
+    "prefix2": "",
+    "title": "",
+    "suffix": ""
+  },
+  {
+    "threshold_ms": 60000,
+    "threshold_s": 60.0,
+    "prefix1": "",
+    "prefix2": "",
+    "title": "",
+    "suffix": ""
+  },
+  {
+    "threshold_ms": 55000,
+    "threshold_s": 55.0,
+    "prefix1": "スマイリーな",
+    "prefix2": "と見なして銃殺刑。",
+    "title": "ダンスマニア",
+    "suffix": "何やってんだ?"
+  },
+  {
+    "threshold_ms": 53000,
+    "threshold_s": 53.0,
+    "prefix1": "存在感のない",
+    "prefix2": "あなたを",
+    "title": "いくさ人",
+    "suffix": "と呼ばせてください。"
+  },
+  {
+    "threshold_ms": 50000,
+    "threshold_s": 50.0,
+    "prefix1": "人畜無害な",
+    "prefix2": "と見なして銃殺刑。",
+    "title": "もののふ",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 47000,
+    "threshold_s": 47.0,
+    "prefix1": "とりあえず",
+    "prefix2": "と見なして銃殺刑。",
+    "title": "もののけ",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 45000,
+    "threshold_s": 45.0,
+    "prefix1": "とりあえず",
+    "prefix2": "と見なして銃殺刑。",
+    "title": "監督",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 44000,
+    "threshold_s": 44.0,
+    "prefix1": "それなりの",
+    "prefix2": "と見なして銃殺刑。",
+    "title": "チーム",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 40000,
+    "threshold_s": 40.0,
+    "prefix1": "それなりの",
+    "prefix2": "と見なして銃殺刑。",
+    "title": "逃亡者",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 37000,
+    "threshold_s": 37.0,
+    "prefix1": "畏れ多くも",
+    "prefix2": "と見なして銃殺刑。",
+    "title": "逃亡者",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 35000,
+    "threshold_s": 35.0,
+    "prefix1": "いやぁんな",
+    "prefix2": "と見なして銃殺刑。",
+    "title": "ミト王子",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 34000,
+    "threshold_s": 34.0,
+    "prefix1": "ん?",
+    "prefix2": "あなたを",
+    "title": "部長",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 30000,
+    "threshold_s": 30.0,
+    "prefix1": "つまらん",
+    "prefix2": "あなたを",
+    "title": "課長",
+    "suffix": "と呼ばせていただく。"
+  },
+  {
+    "threshold_ms": 27000,
+    "threshold_s": 27.0,
+    "prefix1": "役たたずの",
+    "prefix2": "だ。",
+    "title": "係長",
+    "suffix": "に任命する。闘って死ね。"
+  },
+  {
+    "threshold_ms": 25000,
+    "threshold_s": 25.0,
+    "prefix1": "エンゲル係数高そうな",
+    "prefix2": "あなたを",
+    "title": "主任",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 20000,
+    "threshold_s": 20.0,
+    "prefix1": "エンゲル係数高そうな",
+    "prefix2": "あなたを",
+    "title": "壁",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 17000,
+    "threshold_s": 17.0,
+    "prefix1": "顔も見たくない",
+    "prefix2": "あなたを",
+    "title": "お調子者",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 15000,
+    "threshold_s": 15.0,
+    "prefix1": "顔も見たくない",
+    "prefix2": "あなたを",
+    "title": "弾拾い",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 14000,
+    "threshold_s": 14.0,
+    "prefix1": "サル以下の",
+    "prefix2": "あなたを",
+    "title": "買い出し部隊パシリ",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 13000,
+    "threshold_s": 13.0,
+    "prefix1": "サル以下の",
+    "prefix2": "あなたを",
+    "title": "レーザーのレンズ磨き",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 12000,
+    "threshold_s": 12.0,
+    "prefix1": "電光石火の",
+    "prefix2": "あなたを",
+    "title": "使い捨ての駒",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 10000,
+    "threshold_s": 10.0,
+    "prefix1": "電光石火の",
+    "prefix2": "あなたを",
+    "title": "サル見習い",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 8000,
+    "threshold_s": 8.0,
+    "prefix1": "臆病者",
+    "prefix2": "あなたを",
+    "title": "便所掃除",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 5000,
+    "threshold_s": 5.0,
+    "prefix1": "臆病者",
+    "prefix2": "あなたを",
+    "title": "君を",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 3000,
+    "threshold_s": 3.0,
+    "prefix1": "負け犬",
+    "prefix2": "に任命する。活躍を期待する。",
+    "title": "貴様を",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 1000,
+    "threshold_s": 1.0,
+    "prefix1": "負け犬",
+    "prefix2": "に任命する。活躍を期待する。",
+    "title": "あなたは",
+    "suffix": "と認定する。"
+  },
+  {
+    "threshold_ms": 500,
+    "threshold_s": 0.5,
+    "prefix1": "",
+    "prefix2": "敵前逃亡する",
+    "title": "",
+    "suffix": "敵前逃亡する"
+  },
+  {
+    "threshold_ms": 135,
+    "threshold_s": 0.135,
+    "prefix1": "敵前逃亡する",
+    "prefix2": "敵前逃亡する",
+    "title": "敵前逃亡する",
+    "suffix": "敵前逃亡する"
+  }
+]

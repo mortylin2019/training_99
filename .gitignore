@@ -55,16 +55,10 @@ cover/
 *.mo
 *.pot
 
-# Django stuff:
+# Logs
 *.log
 *.log.zip
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask stuff:
-instance/
-.webassets-cache
+logs/
 
 # Scrapy stuff:
 .scrapy

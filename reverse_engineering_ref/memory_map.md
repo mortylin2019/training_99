@@ -2,6 +2,8 @@
 
 This document maps decompiled variable names and functions to human-readable descriptions based on reverse engineering analysis.
 
+> Source: `reverse_engineering_ref/decompiled/99.exe.c` (3113 lines, 78KB)
+
 ## Functions
 
 | Original Name | Human Readable Name | Description |
@@ -26,8 +28,8 @@ This document maps decompiled variable names and functions to human-readable des
 | `DAT_00406d88` | `G_Score_Time` | **Survival Time / Score**. Incremented every frame/tick during gameplay. |
 | `DAT_00406da4` | `G_CurrentTime_Tick` | Current logical game time tick or frame counter. |
 | `DAT_00406d94` | `G_GameStartTime` | Timestamp (`timeGetTime`) when the current game session started. |
-| `DAT_00406da8` | `G_CurrentBulletCount` | Current number of active bullets (capped at 300). Increases over time. |
-| `DAT_00406dc0` | `G_DifficultyMode` | Game difficulty setting (0=Normal, 2=Hard/100 Bullets?). |
+| `DAT_00406da8` | `G_CurrentBulletCount` | Initial bullet count at game start (30/50/100/200 based on difficulty). Increments when new bullets spawn. Compared against entity loop index to trigger spawns. |
+| `DAT_00406dc0` | `G_DifficultyMode` | Game difficulty: 0=Easy(30 bullets), 1=Normal(50), 2=Hard(100), 3=Lunatic(200). |
 | `DAT_00406dc8` | `G_ScoreType` | Likely controls which score multiplier is used (0, 1, 2). |
 | `DAT_00406d8c` | `G_ScoreMultiplier` | Multiplier applied to the score (e.g., 0x10, 0xC, 0). |
 | `DAT_00406e10` | `G_EntityArray` | The main array storing entity structures (position, type, state). |
@@ -48,15 +50,19 @@ This document maps decompiled variable names and functions to human-readable des
 
 ## Structs (Inferred)
 
-**Entity Struct (approx 16 bytes)**
+**Entity Struct (15 bytes at `0x00406e10`)**
+
 ```c
 struct Entity {
-    short x;          // offset 0
-    short y;          // offset 2
-    short vx;         // offset 4
-    short vy;         // offset 6
-    byte type;        // offset 8?
-    byte state;       // offset 9
-    // ... padding or other fields
+    uint32_t raw_x;       // offset 0x00 — raw X (pixel = (raw >> 6) - 4)
+    uint32_t raw_y;       // offset 0x04 — raw Y
+    uint8_t  angle_index; // offset 0x08 — 0xFF = inactive slot
+    uint8_t  graze_flag;  // offset 0x09 — 1 = being grazed
+    uint8_t  type;        // offset 0x0A — 0=Normal, 1=Homing, 2=HomingAccel, 3=Accel
+    uint8_t  timer;       // offset 0x0B — homing recalculation interval
+    uint8_t  index;       // offset 0x0C — internal counter
+    int8_t   vx;          // offset 0x0D — signed X velocity (Type 2)
+    int8_t   vy;          // offset 0x0E — signed Y velocity (Type 2)
 };
+// sizeof = 15 (0x0F), iterated as ptr += 0x0F
 ```
