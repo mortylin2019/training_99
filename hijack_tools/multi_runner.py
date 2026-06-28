@@ -24,18 +24,17 @@ except ImportError:
     from hijack_tools.game_control import GameControl
 
 logger.remove()
-logger.add(sys.stderr, level="INFO")
+logger.add(sys.stderr, level="DEBUG")
 
 
 def tile_window(hwnd, col, row, cols, rows):
-    """Position window in grid — no resize, just move."""
-    sw = ctypes.windll.user32.GetSystemMetrics(0)
-    sh = ctypes.windll.user32.GetSystemMetrics(1) - 40
-    w = sw // cols
-    h = sh // rows
-    x = col * w + max(0, (w - 320) // 2)
-    y = row * h + max(0, (h - 240) // 2)
-    # SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+    """Pack windows in a tight grid — 320×240 each, 4px gap."""
+    gap = 4
+    w = 320
+    h = 240
+    x = col * (w + gap)
+    y = row * (h + gap)
+    # Move without resize, no z-order change, no activate
     ctypes.windll.user32.SetWindowPos(hwnd, 0, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010)
 
 
@@ -66,6 +65,48 @@ def _warmup_ai(ai):
     logger.debug("AI warmup complete")
 
 
+def analyze_death(px, py, bullets):
+    """Analyze what killed the player. Returns a debug string."""
+    active = [b for b in bullets if b.angle_index != 0xFF]
+    if not active:
+        return "no bullets"
+
+    # Find bullets that would hit the player hitbox
+    killers = []
+    nearby = []
+    for b in active:
+        dx = b.x - px
+        dy = b.y - py
+        if 2 <= dx < 13 and 0 <= dy < 10:
+            killers.append(b)
+        dist = (dx*dx + dy*dy) ** 0.5
+        if dist < 50:
+            nearby.append((dist, b))
+
+    # Player screen position analysis
+    edge = ""
+    if px < 30: edge = "LEFT-EDGE"
+    elif px > 274: edge = "RIGHT-EDGE"
+    if py < 30: edge += " TOP-EDGE"
+    elif py > 194: edge += " BOTTOM-EDGE"
+    if not edge: edge = "open"
+
+    # Bullet types near player
+    type_counts = {}
+    for _, b in nearby:
+        type_names = {0: "Normal", 1: "Homing", 2: "H-Accel", 3: "Accel"}
+        name = type_names.get(b.type, f"T{b.type}")
+        type_counts[name] = type_counts.get(name, 0) + 1
+
+    nearby_str = " ".join(f"{c}×{t}" for t, c in sorted(type_counts.items()))
+    killer_str = ""
+    if killers:
+        k = killers[0]
+        killer_str = f"killer: T{k.type} at ({k.x:.0f},{k.y:.0f}) dist={((k.x-px)**2+(k.y-py)**2)**0.5:.0f}"
+
+    return f"pos=({px},{py}) {edge} | {len(nearby)} near: {nearby_str} | {killer_str}"
+
+
 def run_instance(instance_id, ai_name, runs_per_instance, col, row, cols, rows):
     """
     Run one game instance with its own AI. Returns list of run records.
@@ -89,6 +130,12 @@ def run_instance(instance_id, ai_name, runs_per_instance, col, row, cols, rows):
     in_run = False
     max_bullets = 0
     run_count = 0
+    types_seen = {}
+    patterns_seen = {}
+    graze_max = 0
+    last_pattern = -1
+    last_bullets = []   # for death analysis
+    last_px = last_py = 0
 
     try:
         while run_count < runs_per_instance:
@@ -103,6 +150,10 @@ def run_instance(instance_id, ai_name, runs_per_instance, col, row, cols, rows):
             if is_playing and not is_dead and not in_run:
                 in_run = True
                 max_bullets = 0
+                types_seen = {}
+                patterns_seen = {}
+                graze_max = 0
+                last_pattern = -1
                 run_count += 1
 
             # Run end
@@ -111,6 +162,7 @@ def run_instance(instance_id, ai_name, runs_per_instance, col, row, cols, rows):
                 ms = game.get_survival_ms()
                 frames = game.get_game_time()
                 mult = game.get_score_multiplier() or 1
+                death_info = analyze_death(last_px, last_py, last_bullets)
                 history.append({
                     "instance": instance_id,
                     "run": run_count,
@@ -119,10 +171,18 @@ def run_instance(instance_id, ai_name, runs_per_instance, col, row, cols, rows):
                     "frames": frames,
                     "multiplier": mult,
                     "max_bullets": max_bullets,
+                    "graze_max": graze_max,
+                    "types": dict(types_seen),
+                    "patterns": dict(patterns_seen),
+                    "death": death_info,
                 })
+                pstr = ",".join(f"P{p}={c}" for p, c in sorted(patterns_seen.items()))
+                tstr = ",".join(f"T{t}≤{c}" for t, c in sorted(types_seen.items()))
                 logger.success(
-                    f"[I{instance_id}] Run {run_count}: {ms}ms ({ms/1000:.1f}s)"
+                    f"[I{instance_id}] Run {run_count}: {ms}ms ({ms/1000:.1f}s) "
+                    f"| B:{max_bullets} Grz:{graze_max} | [{tstr}] | [{pstr}]"
                 )
+                logger.debug(f"[I{instance_id}] Death: {death_info}")
                 game.write_int(0x00406d7c, 0)
                 time.sleep(0.3)
 
@@ -138,8 +198,33 @@ def run_instance(instance_id, ai_name, runs_per_instance, col, row, cols, rows):
                 px, py = game.get_player_pos()
                 bullets = game.get_bullets()
                 active = [b for b in bullets if b.angle_index != 0xFF]
+
+                # Save for death analysis
+                last_px, last_py = px, py
+                last_bullets = bullets
+
                 if len(active) > max_bullets:
                     max_bullets = len(active)
+
+                # Track bullet type peaks (max seen at any one frame)
+                frame_types = {}
+                for b in active:
+                    frame_types[b.type] = frame_types.get(b.type, 0) + 1
+                for t, c in frame_types.items():
+                    if c > types_seen.get(t, 0):
+                        types_seen[t] = c
+
+                # Track patterns
+                pat = game.get_next_pattern()
+                if pat != last_pattern:
+                    patterns_seen[pat] = patterns_seen.get(pat, 0) + 1
+                    last_pattern = pat
+
+                # Track graze
+                grz = game.get_active_near()
+                if grz > graze_max:
+                    graze_max = grz
+
                 bits = ai.decide(px, py, active)
                 game.write_int(0x00406d7c, bits)
 
@@ -168,9 +253,10 @@ def main():
         f"{total_runs} total | AI: {args.ai}"
     )
 
-    # Compute grid layout
-    cols = min(args.instances, 5)  # max 5 per row
-    rows = (args.instances + cols - 1) // cols
+    # Compute grid layout — nearest square
+    import math
+    cols = math.ceil(math.sqrt(args.instances))
+    rows = math.ceil(args.instances / cols)
 
     all_history = []
     start_time = time.time()
@@ -197,19 +283,28 @@ def main():
 
     times = [r["survival_s"] for r in all_history]
     bullets = [r["max_bullets"] for r in all_history]
-    print("\n" + "=" * 60)
-    print(f"  MULTI-RUNNER SUMMARY — {args.instances} instances")
-    print(f"  Total runs: {len(all_history)} in {elapsed:.0f}s")
-    print(f"  Best:  {max(times):.1f}s")
-    print(f"  Worst: {min(times):.1f}s")
-    print(f"  Avg:   {sum(times)/len(times):.1f}s")
-    print(f"  Max B: {max(bullets)}")
-    print("-" * 60)
-    for r in all_history[:10]:
-        print(f"  I{r['instance']} Run{r['run']:>2}: {r['survival_s']:>6.1f}s")
-    if len(all_history) > 10:
-        print(f"  ... and {len(all_history) - 10} more")
-    print("=" * 60)
+    sorted_times = sorted(times)
+    n = len(sorted_times)
+
+    print("\n" + "=" * 70)
+    print(f"  MULTI-RUNNER SUMMARY — {args.instances} instances × {args.runs} runs")
+    print(f"  Total: {n} runs in {elapsed:.0f}s | AI: {args.ai}")
+    print(f"  Best:  {max(times):.1f}s  Worst: {min(times):.1f}s  "
+          f"Avg: {sum(times)/n:.1f}s  Median: {sorted_times[n//2]:.1f}s")
+    print(f"  P90: {sorted_times[int(n*0.9)]:.1f}s  "
+          f"P75: {sorted_times[int(n*0.75)]:.1f}s  "
+          f"P25: {sorted_times[int(n*0.25)]:.1f}s")
+    print(f"  Max bullets: {max(bullets)}")
+    print("-" * 70)
+    for r in all_history[:15]:
+        tstr = ",".join(f"T{t}={c}" for t,c in sorted(r.get("types",{}).items()))
+        pstr = ",".join(f"P{p}={c}" for p,c in sorted(r.get("patterns",{}).items()))
+        print(f"  I{r['instance']} R{r['run']:>2}: {r['survival_s']:>6.1f}s "
+              f"B:{r['max_bullets']:>3} Grz:{r.get('graze_max',0):>3} "
+              f"[{tstr}] [{pstr}]")
+    if n > 15:
+        print(f"  ... and {n - 15} more")
+    print("=" * 70)
 
     # Save
     os.makedirs("logs", exist_ok=True)

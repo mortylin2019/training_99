@@ -21,14 +21,20 @@ SCR_W, SCR_H = 0x130, 0xE0
 CTR_X, CTR_Y = 0x98, 0x2C
 SPEED = 1
 
-BEAM_DEPTH = 6      # steps to search
-BEAM_WIDTH = 5       # top-K paths kept per step
-CHECK_EVERY = 4      # evaluate every N frames along the path
+BEAM_DEPTH = 10     # steps to search (was 6)
+BEAM_WIDTH = 8       # top-K paths (was 5)
+CHECK_EVERY = 2      # evaluate every N frames (was 4)
+# Total: ~657 path evaluations, ~0.12ms with JIT
 
 COLLISION_VAL = 10_000_000.0
 PROXIMITY_VAL = 4000.0
 CENTER_W = 2.0
 WALL_W = 3000.0
+
+# Safety margin: 2px per side (real 11×10 → simulated 15×14, +91% area)
+# Gives beam search room to route between converging bullet streams
+HIT_X1, HIT_X2 = 0.0, 15.0
+HIT_Y1, HIT_Y2 = -2.0, 12.0
 
 
 @njit
@@ -39,7 +45,7 @@ def _score_pos(px, py, bullets_t):
     for i in range(B):
         dx = bullets_t[i, 0] - px
         dy = bullets_t[i, 1] - py
-        if dx >= 2.0 and dx < 13.0 and dy >= 0.0 and dy < 10.0:
+        if dx >= HIT_X1 and dx < HIT_X2 and dy >= HIT_Y1 and dy < HIT_Y2:
             return COLLISION_VAL, True
         cdx = bullets_t[i, 0] - (px + 7.5)
         cdy = bullets_t[i, 1] - (py + 5.0)
