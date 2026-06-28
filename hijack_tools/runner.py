@@ -167,10 +167,14 @@ def print_summary(history):
     print("=" * 60)
     times = [r["survival_s"] for r in history]
     bullets = [r["max_bullets"] for r in history]
-    print(f"  Runs:        {len(history)}")
+    st = sorted(times)
+    n = len(st)
+    print(f"  Runs:        {n}")
     print(f"  Best:        {max(times):.1f}s")
     print(f"  Worst:       {min(times):.1f}s")
-    print(f"  Avg:         {sum(times)/len(times):.1f}s")
+    print(f"  Avg:         {sum(times)/n:.1f}s")
+    print(f"  Median:      {st[n//2]:.1f}s")
+    print(f"  P90: {st[int(n*0.9)]:.1f}s  P75: {st[int(n*0.75)]:.1f}s  P25: {st[int(n*0.25)]:.1f}s")
     print(f"  Max bullets: {max(bullets)}")
     print("-" * 60)
     for r in history:

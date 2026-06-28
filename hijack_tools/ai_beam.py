@@ -25,7 +25,7 @@ CHECK_EVERY = 4     # every 4f → 160f = 2.0s lookahead
 
 # Scoring weights
 COLLISION_VAL = 1e8
-DANGER_BASE = 2000.0      # base danger per bullet in path
+DANGER_BASE = 2000.0       # base danger per bullet in path
 DANGER_DECAY = 0.85        # exponential decay per frame
 SAFETY_MARGIN = 2.0        # extra clearance around hitbox
 CENTER_PULL = 0.3          # gentle pull toward center
@@ -51,22 +51,18 @@ def _score_pos(px, py, bullets_t):
         dx = bx - px
         dy = by - py
 
-        # Collision check with safety margin
         if (dx >= HIT_X1 - SAFETY_MARGIN and dx < HIT_X2 + SAFETY_MARGIN
                 and dy >= HIT_Y1 - SAFETY_MARGIN and dy < HIT_Y2 + SAFETY_MARGIN):
             return COLLISION_VAL, True
 
-        # Weighted danger: closer = more dangerous, decays with distance²
         d2 = dx * dx + dy * dy
         if d2 < 4.0:
             d2 = 4.0
         danger += DANGER_BASE / d2
 
-    # Center pull (gentle)
     danger += abs(px - CTR_X) * CENTER_PULL
     danger += abs(py - CTR_Y) * CENTER_PULL
 
-    # Wall avoidance
     if px < 10.0:
         danger += (10.0 - px) * WALL_PENALTY
     elif px > SCR_W - 10.0:
@@ -127,7 +123,9 @@ def _beam_search(px0, py0, paths):
                 if fatal:
                     s += 1e9
                 w = 1.0 / (0.5 + t * 0.03)
-                total = beam_score[bi] + s * w
+                # Tiny positional hash breaks ties, prevents deterministic death loops
+                tiebreak = ((int(nx * 7919) ^ int(ny * 6271)) & 0xFFF) * 1e-6
+                total = beam_score[bi] + s * w + tiebreak
 
                 candidates_px[ci] = nx
                 candidates_py[ci] = ny
@@ -148,8 +146,69 @@ def _beam_search(px0, py0, paths):
     return beam_first[0]
 
 
+@njit
+def _max_gap_move(px, py, bullets_arr):
+    """
+    Find the largest angular gap between nearby bullets, move toward its center.
+    Pure survival heuristic — robust when surrounded.
+    bullets_arr: (N,2) array of (bx, by) positions.
+    Returns BITS index (0-8).
+    """
+    N = bullets_arr.shape[0]
+    if N == 0:
+        return 0
+
+    # Compute angles and distances of bullets relative to player
+    angles = np.zeros(N, dtype=np.float64)
+    for i in range(N):
+        dx = bullets_arr[i, 0] - px
+        dy = bullets_arr[i, 1] - py
+        angles[i] = np.arctan2(dy, dx)  # [-π, π]
+
+    # Sort angles
+    angles = np.sort(angles)
+
+    # Find largest gap between consecutive angles
+    best_gap = 0.0
+    best_mid = 0.0
+    for i in range(N - 1):
+        gap = angles[i + 1] - angles[i]
+        if gap > best_gap:
+            best_gap = gap
+            best_mid = (angles[i] + angles[i + 1]) * 0.5
+
+    # Check wrap-around gap
+    wrap_gap = angles[0] + 2.0 * np.pi - angles[N - 1]
+    if wrap_gap > best_gap:
+        best_gap = wrap_gap
+        best_mid = angles[N - 1] + wrap_gap * 0.5
+        if best_mid > np.pi:
+            best_mid -= 2.0 * np.pi
+
+    # Convert gap midpoint angle to a move direction
+    # Map angle to closest of 8 cardinal+diagonal directions
+    cos_a = np.cos(best_mid)
+    sin_a = np.sin(best_mid)
+
+    # Determine primary direction
+    if abs(cos_a) > abs(sin_a):
+        # Horizontal dominant
+        mx = 1 if cos_a > 0 else -1
+        my = 1 if sin_a > 0.4 else (-1 if sin_a < -0.4 else 0)
+    else:
+        # Vertical dominant
+        my = 1 if sin_a > 0 else -1
+        mx = 1 if cos_a > 0.4 else (-1 if cos_a < -0.4 else 0)
+
+    # Match to MOVES array
+    for mi in range(9):
+        if MOVES[mi, 0] == mx and MOVES[mi, 1] == my:
+            return mi
+    return 0
+
+
 class BeamAI:
-    """Multi-step beam search with JIT compilation."""
+    """Hybrid AI: max-gap escape when surrounded, beam search otherwise."""
 
     def __init__(self, vel_table=None, accel_table=None):
         self.vel_table = np.array(vel_table or [(0, 0)], dtype=np.float32)
@@ -159,26 +218,19 @@ class BeamAI:
         return self.vel_table[idx] / 64.0
 
     def _predict(self, bullets):
-        """
-        Predict bullet positions over time.
-        Fair model: uses linear extrapolation from current velocity.
-        Human-visible: bullet direction is clear from movement.
-        """
+        """Predict bullet positions over time (linear extrapolation)."""
         n = len(bullets)
         T = BEAM_DEPTH * CHECK_EVERY + 1
         if n == 0:
             return np.zeros((0, T, 2), dtype=np.float64)
-
         bx = np.array([b.x for b in bullets], dtype=np.float64)
         by = np.array([b.y for b in bullets], dtype=np.float64)
         ang = np.array([b.angle_index for b in bullets], dtype=np.int32)
-
-        vel = self._velocity(ang)  # (N, 2) in pixels/frame
+        vel = self._velocity(ang)
         ts = np.arange(T, dtype=np.float64)
         paths = np.zeros((n, T, 2), dtype=np.float64)
         paths[:, :, 0] = bx[:, None] + vel[:, 0, None] * ts[None, :]
         paths[:, :, 1] = by[:, None] + vel[:, 1, None] * ts[None, :]
-
         return paths
 
     def decide(self, px, py, bullets):
