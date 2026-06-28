@@ -465,3 +465,43 @@ EXPORT int sim_get_graze(GameState* s) { return s->active_near; }
 EXPORT int sim_get_frame(GameState* s) { return s->frame; }
 EXPORT int sim_get_bullet_size(void) { return sizeof(Bullet); }
 EXPORT unsigned int sim_get_rng(GameState* s) { return s->rng_state; }
+
+/* ── Batch episode runner (eliminates per-frame ctypes overhead) ── */
+EXPORT int sim_run_episode(GameState* s, int max_frames,
+    int (*ai_callback)(int px, int py, int n,
+                       int* bx, int* by, int* types, int* angles,
+                       int* vx, int* vy, int graze, int frame))
+{
+    reset_state(s);
+    int graze = 0;
+
+    for (int f = 0; f < max_frames; f++) {
+        /* Collect active bullet data for AI */
+        int n = 0;
+        int bx_buf[200], by_buf[200], types_buf[200];
+        int angles_buf[200], vx_buf[200], vy_buf[200];
+
+        for (int i = 0; i < s->bullet_count && i < MAX_ENTITIES && n < 200; i++) {
+            Bullet *b = &s->bullets[i];
+            if (b->angle_index == INACTIVE) continue;
+            bx_buf[n] = (b->raw_x >> RAW_SHIFT) - PIXEL_OFFSET;
+            by_buf[n] = (b->raw_y >> RAW_SHIFT) - PIXEL_OFFSET;
+            types_buf[n] = b->type;
+            angles_buf[n] = b->angle_index;
+            vx_buf[n] = b->vx;
+            vy_buf[n] = b->vy;
+            n++;
+        }
+
+        /* Call AI (Python callback via ctypes) */
+        int bits = ai_callback(s->px, s->py, n,
+                               bx_buf, by_buf, types_buf, angles_buf,
+                               vx_buf, vy_buf, graze, f);
+
+        /* Step the simulation */
+        if (!sim_step(s, bits))
+            return f;  /* died at this frame */
+        graze = s->active_near;
+    }
+    return max_frames;
+}

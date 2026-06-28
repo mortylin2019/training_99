@@ -45,6 +45,24 @@ _lib.sim_get_graze.restype = ctypes.c_int
 _lib.sim_get_frame.argtypes = [ctypes.c_void_p]
 _lib.sim_get_frame.restype = ctypes.c_int
 
+# ── Batch episode callback type ─────────────────────────────
+AI_CALLBACK = ctypes.CFUNCTYPE(
+    ctypes.c_int,  # return: input bits
+    ctypes.c_int, ctypes.c_int,  # px, py
+    ctypes.c_int,  # n (bullet count)
+    ctypes.POINTER(ctypes.c_int),  # bx array
+    ctypes.POINTER(ctypes.c_int),  # by array
+    ctypes.POINTER(ctypes.c_int),  # types array
+    ctypes.POINTER(ctypes.c_int),  # angles array
+    ctypes.POINTER(ctypes.c_int),  # vx array
+    ctypes.POINTER(ctypes.c_int),  # vy array
+    ctypes.c_int,  # graze
+    ctypes.c_int,  # frame
+)
+
+_lib.sim_run_episode.argtypes = [ctypes.c_void_p, ctypes.c_int, AI_CALLBACK]
+_lib.sim_run_episode.restype = ctypes.c_int
+
 
 class Bullet:
     """Bullet data matching simulator/bullet.py Bullet interface."""
@@ -111,8 +129,7 @@ class CSimulator:
         result = []
         x, y, t, a, vx, vy = (ctypes.c_int() for _ in range(6))
         # Iterate all slots (up to bullet_count), filter active
-        # We use sim_get_bullet_count as an upper bound estimate
-        max_slots = _lib.sim_get_bullet_count(self._ptr) + 50  # rough upper bound
+        max_slots = _lib.sim_get_bullet_count(self._ptr) + 50
         for i in range(min(max_slots, 300)):
             _lib.sim_get_bullet(self._ptr, i, ctypes.byref(x), ctypes.byref(y),
                                ctypes.byref(t), ctypes.byref(a),
@@ -122,3 +139,27 @@ class CSimulator:
             result.append(Bullet(x=x.value, y=y.value, type=t.value,
                                  angle_index=a.value, vx=vx.value, vy=vy.value))
         return result
+
+    def run_episode(self, ai, max_frames=8000):
+        """
+        Run a full episode with the given AI, entirely in C loop.
+        `ai` must have a decide(px, py, bullets, **kwargs) → bits method.
+        Eliminates per-frame ctypes overhead (8000 calls → 1 call).
+        Returns frames survived.
+        """
+        @AI_CALLBACK
+        def _cb(px, py, n, bx_ptr, by_ptr, types_ptr, angles_ptr,
+                vx_ptr, vy_ptr, graze, frame):
+            bullets = []
+            for i in range(n):
+                bullets.append(Bullet(
+                    x=bx_ptr[i], y=by_ptr[i], type=types_ptr[i],
+                    angle_index=angles_ptr[i], vx=vx_ptr[i], vy=vy_ptr[i]))
+            import inspect
+            try:
+                bits = ai.decide(px, py, bullets, graze=graze, frame=frame)
+            except TypeError:
+                bits = ai.decide(px, py, bullets)
+            return bits
+
+        return _lib.sim_run_episode(self._ptr, max_frames, _cb)

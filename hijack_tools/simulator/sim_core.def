@@ -11,4 +11,5 @@ sim_get_graze
 sim_get_player
 sim_get_rng
 sim_reset
+sim_run_episode
 sim_step
