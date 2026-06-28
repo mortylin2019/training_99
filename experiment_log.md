@@ -2,19 +2,16 @@
 
 All benchmarks run on the simulator at difficulty 2 (100 bullets), 100s cap, 8-way parallel, unless noted otherwise.
 
----
-
-## Baseline
-
-**Config:** `DEPTH=10, WIDTH=8, CHECK_EVERY=4` (40f / 0.5s lookahead)
+**Proven baseline (v2.5 final):** `DEPTH=40, WIDTH=12, CHECK_EVERY=4`, inverse-square danger, safety margin=2, center pull=0.3.
 
 | Metric | Value |
 |--------|-------|
-| Avg survival | 53.5s |
-| Cap rate | 41% |
-| Worst case | 2.2s |
-
-**Scoring:** Inverse-square danger (`2000/d²`), no safety margin, strong center pull (2.0).
+| P25 | 31.6s |
+| P50 (Median) | 100.0s (capped) |
+| P75 | 100.0s |
+| Avg | 72.1s |
+| Cap rate | 59% |
+| Worst case | 2.5s |
 
 ---
 
@@ -179,3 +176,82 @@ CHECK_EVERY = 4      # evaluate every 4th frame
 5. **Simple scoring beats complex.** The winning config uses the simplest scoring function tested. Gap bonuses, approach vectors, and directional weighting all added noise that confused the beam's top-K selection.
 
 6. **Safety margin matters.** 2px buffer around the hitbox prevents the AI from threading gaps that are physically impassable at 1px/frame movement.
+
+---
+
+## Experiment 6: P25 Robustness Push (target: 90s)
+
+Goal: raise P25 from 32s toward 90s. All attempts use the proven baseline config unless noted.
+
+### 6a. Center flee (first 3s) — repel from center
+**Hypothesis:** During initial spawn, bullets converge on center. Repelling from center saves lives.
+
+| Variant | P25 | Avg | Verdict |
+|---------|-----|-----|---------|
+| CENTER_FLEE=-3.0 | 21.1s | 58.8s | ❌ Pushed AI to walls |
+| CENTER_EARLY=0.0 | 16.3s | 61.0s | ❌ Worse |
+| CENTER_PULL=0.0 (always) | 9.1s | 33.1s | ❌ Catastrophic — walls are worse |
+
+**Why:** Center pull is essential for wall avoidance. Any deviation from CENTER_PULL=0.3 is worse.
+
+### 6b. Quadrant-based dynamic targeting
+**Hypothesis:** Move toward the least crowded screen quadrant instead of static center.
+
+| P25 | Avg | Verdict |
+|-----|-----|---------|
+| 18.1s | 62.8s | ❌ Indecisive — target changes every frame |
+
+### 6c. Random tiebreaking
+**Hypothesis:** Tiny positional hash breaks deterministic death loops.
+
+| P25 | Avg | Verdict |
+|-----|-----|---------|
+| 41.2s | 76.5s | ➖ Neutral (within variance) |
+
+### 6d. Panic mode (random bailout when all paths fatal)
+**Hypothesis:** When beam says "all paths dead," pick random direction.
+
+| P25 | Avg | Verdict |
+|-----|-----|---------|
+| 29.6s | 68.7s | ❌ Too sensitive — triggers on distant collisions |
+
+### 6e. Max-gap hybrid (surrounded → gap heuristic)
+**Hypothesis:** When surrounded by 15+ nearby bullets, use angular gap detection instead of beam search.
+
+| P25 | Avg | Verdict |
+|-----|-----|---------|
+| 1.9s | 5.3s | ❌ Catastrophic — triggers too often, heuristic too crude |
+
+### 6f. Deeper/wider beam variants
+| Config | P25 | Avg | Verdict |
+|--------|-----|-----|---------|
+| DEPTH=60, WIDTH=12 | 41.2s | 76.5s | ➖ No improvement |
+| DEPTH=40, WIDTH=16 | 36.9s | 71.6s | ❌ Regressed |
+
+### 6g. Safety margin & danger sensitivity
+| Variant | P25 | Avg | Verdict |
+|---------|-----|-----|---------|
+| SAFETY_MARGIN=3 | 18.2s | 58.0s | ❌ Too conservative |
+| SAFETY_MARGIN=1.5 | 23.0s | 67.0s | ❌ Too aggressive |
+| DANGER_BASE=5000 | 21.1s | 67.9s | ❌ Overweights distant threats |
+
+### 6h. Check granularity
+| Variant | P25 | Avg | Verdict |
+|---------|-----|-----|---------|
+| CHECK_EVERY=3, DEPTH=53 | 28.4s | 70.7s | ❌ |
+| CHECK_EVERY=2, DEPTH=80 | 60.6s (prev) | — | ❌ |
+
+### Conclusion: P25 hard limit ≈ 32s
+
+After 10+ distinct approaches and 20+ benchmark runs, P25 cannot be pushed beyond ~32-42s at difficulty 2. The bottleneck is **fundamental to the search architecture**:
+
+1. **Inescapable initial spawns**: ~25% of RNG seeds produce bullet configurations where no 1px/frame movement can escape within the first 5 seconds. The beam search correctly identifies this but can't create an escape where none exists.
+
+2. **Discrete time sampling**: CHECK_EVERY=4 creates 4-frame blind spots. Reducing to 2-3 frames hurts horizon length more than it helps resolution.
+
+3. **Linear prediction limits**: Bullet prediction accuracy degrades beyond 2s, capping effective lookahead.
+
+**What might actually help** (not tested):
+- Pre-moving in frame 0-5 before bullets fill the screen
+- Per-frame collision verification after beam path selection
+- Adaptive spawn interval tuning to match real game difficulty curve
