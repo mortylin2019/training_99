@@ -1,0 +1,225 @@
+"""
+multi_runner.py — Run N AI-controlled game instances in parallel.
+
+Launches N copies of 99.exe, tiles windows on screen, each with its own AI.
+Gameplay uses G_InputState writes. Menu keys use SetForegroundWindow + keybd_event.
+
+Usage:
+    python hijack_tools/multi_runner.py -n 5 --ai ai_beam
+    python hijack_tools/multi_runner.py -n 10 --runs 2
+"""
+
+import time
+import sys
+import ctypes
+import json
+import os
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from loguru import logger
+
+try:
+    from game_control import GameControl
+except ImportError:
+    from hijack_tools.game_control import GameControl
+
+logger.remove()
+logger.add(sys.stderr, level="INFO")
+
+
+def tile_window(hwnd, col, row, cols, rows):
+    """Position window in grid — no resize, just move."""
+    sw = ctypes.windll.user32.GetSystemMetrics(0)
+    sh = ctypes.windll.user32.GetSystemMetrics(1) - 40
+    w = sw // cols
+    h = sh // rows
+    x = col * w + max(0, (w - 320) // 2)
+    y = row * h + max(0, (h - 240) // 2)
+    # SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+    ctypes.windll.user32.SetWindowPos(hwnd, 0, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010)
+
+
+def load_ai(name):
+    if name == "ai_beam":
+        from ai_beam import BeamAI
+        return BeamAI
+    if name == "ai_direct":
+        from ai_direct import SuperiorAI
+        return SuperiorAI
+    raise ValueError(f"Unknown AI: {name}")
+
+
+def send_enter(hwnd):
+    """Send VK_RETURN to a specific window via PostMessage."""
+    ctypes.windll.user32.PostMessageW(hwnd, 0x100, 0x0D, 0)
+    time.sleep(0.05)
+    ctypes.windll.user32.PostMessageW(hwnd, 0x101, 0x0D, 0)
+
+
+def _warmup_ai(ai):
+    """Force JIT compilation before gameplay starts."""
+    from bullet_data import Bullet
+    fake = [Bullet(raw_x=0x8000, raw_y=0x4000, angle_index=10, active=1,
+                   type=0, timer=0, index=0, vx=0, vy=0) for _ in range(20)]
+    for _ in range(3):
+        ai.decide(152, 44, fake)
+    logger.debug("AI warmup complete")
+
+
+def run_instance(instance_id, ai_name, runs_per_instance, col, row, cols, rows):
+    """
+    Run one game instance with its own AI. Returns list of run records.
+    """
+    game = GameControl()
+    if not game.launch_game():
+        logger.error(f"[I{instance_id}] Launch FAILED")
+        return []
+    logger.info(f"[I{instance_id}] PID={game.pid} HWND=0x{game.hwnd:X}")
+
+    if game.hwnd:
+        tile_window(game.hwnd, col, row, cols, rows)
+
+    AI = load_ai(ai_name)
+    ai = AI(vel_table=game.vel_table, accel_table=game.accel_table)
+
+    # Warm up JIT compilation BEFORE the game starts
+    _warmup_ai(ai)
+
+    history = []
+    in_run = False
+    max_bullets = 0
+    run_count = 0
+
+    try:
+        while run_count < runs_per_instance:
+            # Keep game alive: clear tab-out flag, set IsGameRunning
+            game.write_int(0x00406d9c, 0)  # DAT_00406d9c = not tabbed out
+            game.write_int(0x00406d90, 1)  # G_IsGameRunning = 1
+
+            is_playing = game.is_playing()
+            is_dead = game.is_game_over()
+
+            # Run start
+            if is_playing and not is_dead and not in_run:
+                in_run = True
+                max_bullets = 0
+                run_count += 1
+
+            # Run end
+            if in_run and (not is_playing or is_dead):
+                in_run = False
+                ms = game.get_survival_ms()
+                frames = game.get_game_time()
+                mult = game.get_score_multiplier() or 1
+                history.append({
+                    "instance": instance_id,
+                    "run": run_count,
+                    "survival_ms": ms,
+                    "survival_s": ms / 1000.0,
+                    "frames": frames,
+                    "multiplier": mult,
+                    "max_bullets": max_bullets,
+                })
+                logger.success(
+                    f"[I{instance_id}] Run {run_count}: {ms}ms ({ms/1000:.1f}s)"
+                )
+                game.write_int(0x00406d7c, 0)
+                time.sleep(0.3)
+
+            # Menu navigation — per-window PostMessage, no focus needed
+            if not is_playing and not in_run:
+                game.write_int(0x00406d7c, 0)
+                send_enter(game.hwnd)
+                time.sleep(0.2)
+                continue
+
+            # Gameplay
+            if in_run and is_playing:
+                px, py = game.get_player_pos()
+                bullets = game.get_bullets()
+                active = [b for b in bullets if b.angle_index != 0xFF]
+                if len(active) > max_bullets:
+                    max_bullets = len(active)
+                bits = ai.decide(px, py, active)
+                game.write_int(0x00406d7c, bits)
+
+    except Exception as e:
+        logger.error(f"[Instance {instance_id}] Error: {e}")
+    finally:
+        game.write_int(0x00406d7c, 0)
+        game.cleanup()
+
+    return history
+
+
+def main():
+    import argparse
+    p = argparse.ArgumentParser(description="Multi-instance AI Runner")
+    p.add_argument("-n", "--instances", type=int, default=5,
+                   help="Number of parallel game instances")
+    p.add_argument("--ai", default="ai_beam", help="AI algorithm")
+    p.add_argument("--runs", type=int, default=2,
+                   help="Runs per instance (total = instances × runs)")
+    args = p.parse_args()
+
+    total_runs = args.instances * args.runs
+    logger.info(
+        f"Starting {args.instances} instances × {args.runs} runs = "
+        f"{total_runs} total | AI: {args.ai}"
+    )
+
+    # Compute grid layout
+    cols = min(args.instances, 5)  # max 5 per row
+    rows = (args.instances + cols - 1) // cols
+
+    all_history = []
+    start_time = time.time()
+
+    with ThreadPoolExecutor(max_workers=args.instances) as pool:
+        futures = {}
+        for i in range(args.instances):
+            col = i % cols
+            row = i // cols
+            f = pool.submit(run_instance, i, args.ai, args.runs, col, row, cols, rows)
+            futures[f] = i
+            time.sleep(0.3)  # stagger launches so windows don't overlap
+        for future in as_completed(futures):
+            result = future.result()
+            all_history.extend(result)
+
+    elapsed = time.time() - start_time
+    all_history.sort(key=lambda r: r["survival_s"], reverse=True)
+
+    # Print summary
+    if not all_history:
+        print("\n  No runs completed — all instances failed.")
+        return
+
+    times = [r["survival_s"] for r in all_history]
+    bullets = [r["max_bullets"] for r in all_history]
+    print("\n" + "=" * 60)
+    print(f"  MULTI-RUNNER SUMMARY — {args.instances} instances")
+    print(f"  Total runs: {len(all_history)} in {elapsed:.0f}s")
+    print(f"  Best:  {max(times):.1f}s")
+    print(f"  Worst: {min(times):.1f}s")
+    print(f"  Avg:   {sum(times)/len(times):.1f}s")
+    print(f"  Max B: {max(bullets)}")
+    print("-" * 60)
+    for r in all_history[:10]:
+        print(f"  I{r['instance']} Run{r['run']:>2}: {r['survival_s']:>6.1f}s")
+    if len(all_history) > 10:
+        print(f"  ... and {len(all_history) - 10} more")
+    print("=" * 60)
+
+    # Save
+    os.makedirs("logs", exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = os.path.join("logs", f"multi_{args.ai}_{ts}.json")
+    with open(path, "w") as f:
+        json.dump({"ai": args.ai, "instances": args.instances,
+                    "elapsed_s": elapsed, "runs": all_history}, f, indent=2)
+    logger.info(f"Saved → {path}")
+
+
+if __name__ == "__main__":
+    main()

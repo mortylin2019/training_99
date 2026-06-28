@@ -35,6 +35,12 @@ def load_ai(name):
     if name == "ai_direct":
         from ai_direct import SuperiorAI
         return SuperiorAI
+    if name == "ai_beam":
+        from ai_beam import BeamAI
+        return BeamAI
+    if name == "ai_numba":
+        from ai_beam import BeamAI
+        return BeamAI  # legacy alias
     raise ValueError(f"Unknown AI: {name}")
 
 
@@ -46,6 +52,13 @@ def run(ai_name="ai_direct", max_runs=10):
 
     AI = load_ai(ai_name)
     ai = AI(vel_table=game.vel_table, accel_table=game.accel_table)
+
+    # Warm up JIT before game starts
+    from bullet_data import Bullet
+    fake = [Bullet(raw_x=0x8000, raw_y=0x4000, angle_index=i, active=1,
+                   type=0, timer=0, index=0, vx=0, vy=0) for i in range(20)]
+    for _ in range(3):
+        ai.decide(152, 44, fake)
 
     mode = f"{max_runs} runs" if max_runs > 0 else "infinite"
     logger.info(f"Runner — AI:{ai_name} — {mode} — Ctrl+C to stop.")
