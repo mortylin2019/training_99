@@ -12,12 +12,7 @@ import torch.nn as nn
 import random
 import os
 from collections import deque
-
-try:
-    from tqdm import tqdm
-    HAS_TQDM = True
-except ImportError:
-    HAS_TQDM = False
+from loguru import logger
 
 # ── State encoding (CNN grid + temporal) ────────────────────
 GRID_W, GRID_H = 32, 24
@@ -81,26 +76,23 @@ def encode_state(px, py, bullets, graze=0, frame=0, prev_density=None):
 
 
 class QNetwork(nn.Module):
-    """CNN: grid state → spatial features → Q-values for 9 actions."""
+    """Light CNN: 32×24 → 2 convs → pool → 768 → 128 → 9."""
     def __init__(self, n_actions=N_ACTIONS):
         super().__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(N_CHANNELS, 16, 3, padding=1), nn.ReLU(),
-            nn.Conv2d(16, 32, 3, padding=1), nn.ReLU(),
-            nn.Conv2d(32, 32, 3, padding=1), nn.ReLU(),
+            nn.Conv2d(16, 16, 3, padding=1, stride=2), nn.ReLU(),  # 16×12
         )
-        self.pool = nn.AdaptiveAvgPool2d((6, 8))  # 32×24 → 6×8 = 1536
+        self.pool = nn.AdaptiveAvgPool2d((6, 8))  # → 16×6×8 = 768
         self.head = nn.Sequential(
-            nn.Linear(32 * 6 * 8, 128), nn.ReLU(),
+            nn.Linear(768, 128), nn.ReLU(),
             nn.Linear(128, n_actions),
         )
 
     def forward(self, x):
-        # x: (B, C, H, W)
         f = self.conv(x)
         f = self.pool(f)
-        f = f.view(f.size(0), -1)
-        return self.head(f)
+        return self.head(f.view(f.size(0), -1))
 
 
 class RLAgent:
@@ -267,14 +259,9 @@ def train(episodes=10000, difficulty=1, max_frames=8000,
     if resume and os.path.exists(save_path):
         if agent.load(save_path):
             start_ep = agent.episodes
-            print(f"Resumed from {save_path} (ep {start_ep}, eps={agent.epsilon:.3f})")
+            logger.info(f"Resumed from {save_path} (ep {start_ep}, eps={agent.epsilon:.3f})")
 
     history = []
-    pbar = tqdm(total=episodes, initial=start_ep, desc="Training",
-                unit="ep", disable=not HAS_TQDM,
-                bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {postfix}')
-
-    weight_path = save_path.replace('.pt', '_c_weights.bin')
     ep = start_ep
     while ep < episodes:
         # ── Phase 1: Collect with Python workers (parallel) ─
@@ -302,7 +289,7 @@ def train(episodes=10000, difficulty=1, max_frames=8000,
                     all_transitions.extend(trans)
                     all_ep_frames.extend(ep_frames)
                 except Exception as e:
-                    print(f"Worker failed: {e}")
+                    logger.warning(f"Worker failed: {e}")
 
         for t in all_transitions:
             agent.remember(*t)
@@ -355,19 +342,15 @@ def train(episodes=10000, difficulty=1, max_frames=8000,
         avg_loss = sum(train_losses) / max(len(train_losses), 1) if train_losses else 0
         recent = history[-100:] if len(history) >= 100 else history
         avg_surv = sum(recent) / max(len(recent), 1) if recent else 0
-        pbar.update(n_collect)
-        pbar.set_postfix({
-            'surv': f'{avg_surv:.1f}s', 'eps': f'{agent.epsilon:.3f}',
-            'buf': len(agent.replay), 'loss': f'{avg_loss:.4f}',
-        })
 
         if len(history) > 0:
             agent.episodes = ep
             agent.save(save_path)
-            if avg_surv > 0:
-                pbar.write(f"  saved @ ep {ep} (avg {avg_surv:.1f}s, loss={avg_loss:.4f})")
+            logger.info(
+                f"ep {ep:>5}/{episodes} | surv={avg_surv:.1f}s "
+                f"eps={agent.epsilon:.2f} loss={avg_loss:.4f} "
+                f"buf={len(agent.replay)} | saved")
 
-    pbar.close()
     return agent, history
 
 
