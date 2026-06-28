@@ -3,7 +3,6 @@ import time
 import subprocess
 import os
 import struct
-import threading
 import sys
 from loguru import logger
 try:
@@ -21,6 +20,9 @@ logger.add("logs/game_ai.log", rotation="10 MB", retention="5 days", compression
 # Windows Constants
 PROCESS_ALL_ACCESS = 0x1F0FFF
 VK_RETURN = 0x0D
+
+# Input event constants for keybd_event
+KEYEVENTF_KEYUP = 0x0002
 
 # ============================================================================
 # Game Memory Map — ALL known addresses from reverse engineering
@@ -81,6 +83,8 @@ ADDR_PATTERN_BAR_X   = 0x00406df4  # Pattern bar X offset
 ADDR_PATTERN_BAR_W   = 0x00406df8  # Pattern bar width per unit
 
 class GameControl:
+    """Pure memory I/O layer — no game loop, no AI logic."""
+    
     def __init__(self, exe_path=r"C:\git\training_99\raw\99.exe"):
         self.exe_path = exe_path
         self.process_handle = None
@@ -88,23 +92,9 @@ class GameControl:
         self.hwnd = None
         self.proc = None
         
-        # Fast State Tracking
-        self.latest_bullets = []
-        self.player_pos = (0, 0)
-        self.game_playing = False
-        self.game_dead = False
-        self.game_time = 0
-        self._stop_event = threading.Event()
-        self._thread = None
-        
-        # Telemetry
-        self.update_count = 0
-        self.fps_avg = 0
-        self.last_fps_check = time.time()
-        
-        # Velocity Tables (Read from game memory)
-        self.vel_table = [] # List of (vx, vy) for Type 0, 1
-        self.accel_table = [] # List of (vx, vy) for Type 3
+        # Velocity Tables (read from game memory once at init)
+        self.vel_table = []
+        self.accel_table = []
 
     # ── Lookup Tables ──────────────────────────────────────────────
     
@@ -357,42 +347,6 @@ class GameControl:
     # Movement is done by writing G_InputState (0x00406d7c) bitmask.
     # The game reads this each frame and moves player 1px/frame in the
     # indicated directions. This is TRUE hijack — no SendMessage/WM_KEYDOWN.
-    # See set_input_state() below for the actual write.
-
-    def _state_updater(self):
-        """Background thread to read memory as fast as possible."""
-        while not self._stop_event.is_set():
-            if self.process_handle:
-                try:
-                    # Sync common variables
-                    self.player_pos = self.get_player_pos()
-                    self.game_playing = self.read_int(ADDR_PAUSE_FLAG) == 1
-                    self.game_dead = self.read_int(ADDR_GAME_OVER) == 1
-                    self.game_time = self.read_int(ADDR_GAME_TIME) or 0
-                    
-                    if self.game_playing:
-                        self.latest_bullets = self.get_bullets()
-                        self.update_count += 1
-                    
-                    # Calculate Stats every second
-                    now = time.time()
-                    elapsed = now - self.last_fps_check
-                    if elapsed >= 1.0:
-                        if elapsed > 0:
-                            self.fps_avg = self.update_count / elapsed
-                        self.update_count = 0
-                        self.last_fps_check = now
-                except:
-                    pass
-            # Very short sleep to prevent CPU hogging but keep FPS high
-            # Using 0.0001 or tighter
-            time.sleep(0.0001) 
-
-    def start_sync(self):
-        """Starts the background memory sync thread."""
-        self._stop_event.clear()
-        self._thread = threading.Thread(target=self._state_updater, daemon=True)
-        self._thread.start()
 
     def launch_game(self):
         """Launches the game and attaches to its process."""
@@ -400,43 +354,64 @@ class GameControl:
         try:
             self.proc = subprocess.Popen(self.exe_path, cwd=os.path.dirname(self.exe_path))
             self.pid = self.proc.pid
-            time.sleep(1) # Wait for window to initialize
-            
-            # Find Window
-            # Title is '特訓９９' (Japanese for Training 99)
-            # We try both fullwidth and normal just in case
-            titles = ["特訓９９", "99", "特訓"]
-            for title in titles:
-                self.hwnd = ctypes.windll.user32.FindWindowW(None, title)
-                if self.hwnd:
-                    logger.info(f"Found window: {title} (HWND: {self.hwnd})")
-                    break
-            
-            if not self.hwnd:
-                # Try finding by class name if known (from analysis: 'TKKN')
-                self.hwnd = ctypes.windll.user32.FindWindowW("TKKN", None)
-                if self.hwnd:
-                    logger.info(f"Found window by class TKKN (HWND: {self.hwnd})")
 
-            # Get process handle
-            self.process_handle = ctypes.windll.kernel32.OpenProcess(PROCESS_ALL_ACCESS, False, self.pid)
+            # Get process handle first (PID is immediate)
+            self.process_handle = ctypes.windll.kernel32.OpenProcess(
+                PROCESS_ALL_ACCESS, False, self.pid)
+
             if not self.process_handle:
-                # If we can't get it by PID from Popen (maybe it spawned another process), try GetWindowThreadProcessId
-                pid = ctypes.c_ulong()
-                ctypes.windll.user32.GetWindowThreadProcessId(self.hwnd, ctypes.byref(pid))
-                self.pid = pid.value
-                self.process_handle = ctypes.windll.kernel32.OpenProcess(PROCESS_ALL_ACCESS, False, self.pid)
-
-            if self.process_handle:
-                logger.success(f"Attached to process PID: {self.pid}")
-                self._read_tables() # Read pattern tables once
-                return True
-            else:
-                logger.error("Failed to attach to process.")
+                logger.error("Failed to open process")
                 return False
+
+            logger.success(f"Attached to process PID: {self.pid}")
+
+            # Find window — the game may take a moment to create it
+            self.hwnd = self._find_window_by_pid(self.pid)
+            if not self.hwnd:
+                logger.error("Could not find game window")
+                return False
+
+            logger.info(f"Window handle: 0x{self.hwnd:X}")
+            self._read_tables()
+            return True
         except Exception as e:
             logger.exception(f"Error launching game: {e}")
             return False
+
+    def _find_window_by_pid(self, pid, timeout=5.0):
+        """
+        Find the main window belonging to a process by enumerating all
+        top-level windows and checking their owner PID. Retries until
+        the window appears or timeout expires.
+        """
+        import ctypes.wintypes
+
+        result = []
+
+        @ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL,
+                            ctypes.wintypes.HWND,
+                            ctypes.wintypes.LPARAM)
+        def enum_callback(hwnd, lparam):
+            proc_id = ctypes.c_ulong()
+            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(proc_id))
+            if proc_id.value == pid:
+                # Check if this is a visible main window (has a title)
+                if ctypes.windll.user32.IsWindowVisible(hwnd):
+                    length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+                    if length > 0:
+                        result.append(hwnd)
+                        return False  # Stop enumeration
+            return True  # Continue enumeration
+
+        start = time.time()
+        while time.time() - start < timeout:
+            result.clear()
+            ctypes.windll.user32.EnumWindows(enum_callback, 0)
+            if result:
+                return result[0]
+            time.sleep(0.2)
+
+        return None
 
     def read_memory(self, address, size=4):
         """Reads memory from the process."""
@@ -510,16 +485,32 @@ class GameControl:
         return bullets
 
     def send_key(self, vk_code, duration=0.03):
-        """Sends a key press event to the game window."""
-        if not self.hwnd: return
-        # Using SendMessage for more reliable input than PostMessage
-        # WM_KEYDOWN = 0x100, WM_KEYUP = 0x101
-        ctypes.windll.user32.SendMessageW(self.hwnd, 0x100, vk_code, 0)
+        """
+        Send a key to the game via system-level synthetic input (keybd_event).
+        The game uses PeekMessageA and WaitMessage() — keybd_event injects
+        into the system input queue, bypassing message encoding issues.
+        """
+        if not self.hwnd:
+            logger.warning("No window handle — cannot send key")
+            return
+        ctypes.windll.user32.SetForegroundWindow(self.hwnd)
+        time.sleep(0.03)
+        ctypes.windll.user32.keybd_event(vk_code, 0, 0, 0)
         if duration > 0:
             time.sleep(duration)
-            ctypes.windll.user32.SendMessageW(self.hwnd, 0x101, vk_code, 0)
+            ctypes.windll.user32.keybd_event(vk_code, 0, KEYEVENTF_KEYUP, 0)
 
     def press_enter(self): self.send_key(VK_RETURN, duration=0.1)
+
+    def navigate_menu(self):
+        """
+        Navigate menu screens. Uses PostMessage(WM_KEYDOWN VK_RETURN)
+        because after death the game blocks on WaitMessage() and does
+        NOT read G_InputState. PostMessage queues a real Windows
+        message, which wakes WaitMessage() and gets dispatched by
+        the game's PeekMessage loop.
+        """
+        self.send_key(VK_RETURN, duration=0.1)
 
     def cleanup(self):
         """Kills the game process if it is running."""
@@ -530,92 +521,3 @@ class GameControl:
                 self.proc.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 self.proc.kill()
-
-    def run_ai(self):
-        """
-        Runs the AI avoidance logic with state management and logging.
-        Uses ai_direct by default — the most advanced AI that reads ALL
-        game data (velocity tables, patterns, spawn timing) from decompiled code.
-        Control: input bitmask hijack (write G_InputState, NOT keyboard).
-        """
-        from ai_direct import SuperiorAI
-        ai = SuperiorAI(self)
-        
-        if not self.launch_game(): return
-        self.start_sync() # Start background memory reading
-        
-        in_run = False
-        max_bullets = 0
-        last_log_time = time.time()
-        
-        logger.info("AI Controller started (Async Mode). Monitoring game...")
-        
-        try:
-            while True:
-                is_playing = self.game_playing
-                is_dead = self.game_dead
-                
-                # Check for run start
-                if is_playing and not is_dead and not in_run:
-                    in_run = True
-                    max_bullets = 0
-                    logger.success(f"NEW GAME STARTED")
-
-                # Check for run end
-                if in_run and (not is_playing or is_dead):
-                    in_run = False
-                    raw_val = self.game_time
-                    multiplier = self.read_int(ADDR_SCORE_MULTIPLIER) or 16
-                    final_sec = raw_val / 1000.0
-                    actual_ticks = int(raw_val / multiplier) if multiplier else 0
-                    logger.success(f"RUN FINISHED | Time: {final_sec:.3f}s | Ticks: {actual_ticks} | Max Bullets: {max_bullets}")
-                    time.sleep(1.0) 
-
-                # Auto-navigation for menus
-                if not is_playing and not in_run:
-                    self.write_int(ADDR_INPUT_STATE, 0)
-                    self.press_enter()
-                    time.sleep(0.2)
-
-                # Active Gameplay Logic
-                if in_run and is_playing:
-                    bullets = self.latest_bullets
-                    
-                    # Count types
-                    # 0: Normal, 1: Homing, 2: Bounce, 3: Accel
-                    type_counts = {0: 0, 1: 0, 2: 0, 3: 0}
-                    active_count = 0
-                    for b in bullets:
-                        if b.angle_index != 0xFF:
-                            active_count += 1
-                            t = b.type
-                            if t in type_counts:
-                                type_counts[t] += 1
-                            else:
-                                # Catch-all for any unknown types
-                                type_counts[0] += 1 
-                    
-                    if active_count > max_bullets:
-                        max_bullets = active_count
-                        
-                    # Enhanced Log with FPS and Detailed Counts
-                    # N: Normal, H: Homing, B: Bounce, A: Accel
-                    # Log status every 1 second to avoid spamming the file
-                    if time.time() - last_log_time > 1.0:
-                        counts_str = f"N:{type_counts[0]} H:{type_counts[1]} B:{type_counts[2]} A:{type_counts[3]}"
-                        logger.info(f"[SYNC:{self.fps_avg:4.1f} FPS] [B:{active_count:3} ({counts_str})]")
-                        last_log_time = time.time()
-
-                    ai.perform_move()
-                else:
-                    time.sleep(0.01)
-                    
-        except KeyboardInterrupt:
-            self.write_int(ADDR_INPUT_STATE, 0)
-            logger.info("AI Controller stopped by user.")
-        finally:
-            self.cleanup()
-
-if __name__ == "__main__":
-    game = GameControl()
-    game.run_ai()

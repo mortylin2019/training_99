@@ -1,186 +1,27 @@
 """
-ai_direct.py — Superior Survival AI using Full Game State Hijack
+ai_direct.py — Pure algorithm: state in → bitmask out.
 
-Reads ALL available game data from decompiled memory addresses:
-- Player position, bullet array, velocity tables
-- Pattern info (what pattern is active, duration remaining)
-- Spawn timing (when next bullets arrive)
-
-Control: Writes input bitmask directly to G_InputState (0x00406d7c).
-This is TRUE process hijack — NO keyboard SendMessage, NO teleportation.
-The game reads this bitmask each frame and moves player 1px/frame.
+NO process access, NO memory reading, NO game loop here.
+Takes player position + bullets, returns direction bitmask (0–12).
 
 Algorithm: Two-Pass Time-Space Danger Evaluation
-  Pass 1 (Immediate): Check frames 1-5 for imminent death → PANIC
-  Pass 2 (Strategic): Check frames 8-50 for positioning, center pull
-  Uses numpy-vectorized bullet prediction from actual velocity tables.
+  Pass 1 (Immediate): frames 1-5 → panic if collision imminent
+  Pass 2 (Strategic): frames 8-50 → center-seeking, open-space
+  Uses numpy-vectorized bullet prediction from velocity tables.
 """
 
-import time
 import math
 import numpy as np
-from loguru import logger
-
-try:
-    from game_control import GameControl
-    import keyboard as kbd
-except ImportError:
-    from hijack_tools.game_control import GameControl
-    import hijack_tools.keyboard as kbd
 
 
 class SuperiorAI:
     """
-    Two-pass danger evaluation with exact bullet trajectory prediction.
-    Writes to G_InputState — the game's native movement mechanism.
+    Pure decision algorithm — no game I/O.
+    
+    Usage:
+        ai = SuperiorAI(vel_table, accel_table)
+        bits = ai.decide(px=150, py=50, bullets=[...])
     """
-
-    def __init__(self, game_instance=None):
-        self.game = game_instance if game_instance else GameControl()
-
-        # Screen bounds (from decompiled: game clamps PlayerX to [0, 0x130], Y to [0, 0xE0])
-        self.SCREEN_W = 0x130
-        self.SCREEN_H = 0xE0
-        self.CENTER_X = 0x98   # 152 — actual game start X
-        self.CENTER_Y = 0x2C   # 44  — actual game start Y
-
-        # Hitbox (Stage2_GameEntityLoop.c):
-        #   if ((iVar4 - 2U < 0xb) && (uVar8 < 10)) → collision
-        #   iVar4 = bx - px, uVar8 = by - py
-        #   So: 2 <= (bx-px) < 13  AND  0 <= (by-py) < 10
-        self.HITBOX_X1 = 2
-        self.HITBOX_X2 = 13
-        self.HITBOX_Y1 = 0
-        self.HITBOX_Y2 = 10
-
-        self.PREDICT_FRAMES = 60
-        self.MOVE_SPEED = 1
-
-        # Weights
-        self.COLLISION = 10_000_000.0
-        self.PROXIMITY = 4000.0
-        self.CENTER_GRAVITY = 2.0
-        self.WALL_FORCE = 3000.0
-        self.WALL_MARGIN = 15
-
-        self._last_log = 0.0
-        self._log_interval = 2.0
-
-    # ── Vectorized Bullet Prediction ───────────────────────────────
-
-    def predict_all_bullets(self, active):
-        """Predict ALL bullet positions: returns (N, FRAMES+1, 2) float32 array."""
-        n = len(active)
-        if n == 0:
-            return np.zeros((0, self.PREDICT_FRAMES + 1, 2), dtype=np.float32)
-
-        paths = np.zeros((n, self.PREDICT_FRAMES + 1, 2), dtype=np.float32)
-        ts = np.arange(self.PREDICT_FRAMES + 1, dtype=np.float32)
-
-        for i, b in enumerate(active):
-            if b.type == 2:
-                vx = b.vx / 64.0
-                vy = b.vy / 64.0
-            else:
-                vx_raw, vy_raw = self.game.get_bullet_velocity(b.angle_index, b.type)
-                vx = vx_raw / 64.0
-                vy = vy_raw / 64.0
-
-            paths[i, :, 0] = float(b.x) + vx * ts
-            paths[i, :, 1] = float(b.y) + vy * ts
-
-        return paths
-
-    # ── Collision Check ────────────────────────────────────────────
-
-    def check_collision(self, px, py, bullets_at_frame):
-        """
-        Check hitbox vs bullets at a specific frame.
-        Returns (hit_count, min_distance).
-        """
-        if bullets_at_frame.shape[0] == 0:
-            return 0, 9999.0
-
-        bx = bullets_at_frame[:, 0]
-        by = bullets_at_frame[:, 1]
-
-        dx = bx - px
-        dy = by - py
-        hits = np.sum(
-            (dx >= self.HITBOX_X1) & (dx < self.HITBOX_X2) &
-            (dy >= self.HITBOX_Y1) & (dy < self.HITBOX_Y2)
-        )
-
-        cx, cy = px + 7.5, py + 5.0
-        dists = np.sqrt((bx - cx) ** 2 + (by - cy) ** 2)
-        min_d = float(np.min(dists))
-
-        return int(hits), min_d
-
-    # ── Score Position at Frame ────────────────────────────────────
-
-    def score_at_frame(self, px, py, paths, fidx):
-        """Score (px,py) at frame fidx. Returns (score, is_fatal)."""
-        if fidx >= paths.shape[1]:
-            fidx = paths.shape[1] - 1
-
-        hits, min_d = self.check_collision(px, py, paths[:, fidx, :])
-        if hits > 0:
-            return self.COLLISION + hits, True
-
-        danger = self.PROXIMITY / max(min_d * min_d, 1.0)
-
-        # Center gravity
-        dc = math.sqrt((px - self.CENTER_X) ** 2 + (py - self.CENTER_Y) ** 2)
-        danger += dc * self.CENTER_GRAVITY
-
-        # Walls
-        if px < self.WALL_MARGIN:
-            danger += (self.WALL_MARGIN - px) * self.WALL_FORCE
-        elif px > self.SCREEN_W - self.WALL_MARGIN:
-            danger += (px - (self.SCREEN_W - self.WALL_MARGIN)) * self.WALL_FORCE
-        if py < self.WALL_MARGIN:
-            danger += (self.WALL_MARGIN - py) * self.WALL_FORCE
-        elif py > self.SCREEN_H - self.WALL_MARGIN:
-            danger += (py - (self.SCREEN_H - self.WALL_MARGIN)) * self.WALL_FORCE
-
-        return danger, False
-
-    # ── Evaluate Move ──────────────────────────────────────────────
-
-    def eval_move(self, px, py, dx, dy, paths):
-        """
-        Two-pass evaluation of a direction.
-        Returns (total_score, is_fatal).
-        """
-        immediate = [1, 2, 3, 4, 5]
-        strategic = [8, 12, 18, 25, 35, 50]
-
-        score = 0.0
-        fatal = False
-
-        # Pass 1: Immediate survival (HEAVY weight)
-        for f in immediate:
-            fx = max(0, min(self.SCREEN_W, px + dx * self.MOVE_SPEED * f))
-            fy = max(0, min(self.SCREEN_H, py + dy * self.MOVE_SPEED * f))
-            s, is_fatal = self.score_at_frame(fx, fy, paths, f)
-            w = 1.0 / (f * 0.3 + 0.3)
-            score += s * w
-            if is_fatal:
-                fatal = True
-
-        # Pass 2: Strategic (only if not dying)
-        if not fatal:
-            for f in strategic:
-                fx = max(0, min(self.SCREEN_W, px + dx * self.MOVE_SPEED * f))
-                fy = max(0, min(self.SCREEN_H, py + dy * self.MOVE_SPEED * f))
-                s, _ = self.score_at_frame(fx, fy, paths, f)
-                w = 1.0 / (1.0 + f * 0.06)
-                score += s * w
-
-        return score, fatal
-
-    # ── Perform Move ───────────────────────────────────────────────
 
     MOVE_TABLE = [
         ( 0,  0, 0),   # STOP
@@ -194,105 +35,116 @@ class SuperiorAI:
         ( 1,  1, 12),  # DOWN-RIGHT
     ]
 
-    def perform_move(self):
-        """Read state → predict → evaluate → write bitmask."""
-        px, py = self.game.get_player_pos()
+    def __init__(self, vel_table=None, accel_table=None):
+        self.vel_table = vel_table or []
+        self.accel_table = accel_table or []
+
+        self.SCREEN_W = 0x130
+        self.SCREEN_H = 0xE0
+        self.CENTER_X = 0x98
+        self.CENTER_Y = 0x2C
+
+        # Hitbox: 2 <= (bx-px) < 13  AND  0 <= (by-py) < 10
+        self.HITBOX_X1, self.HITBOX_X2 = 2, 13
+        self.HITBOX_Y1, self.HITBOX_Y2 = 0, 10
+
+        self.PREDICT_FRAMES = 60
+        self.SPEED = 1
+
+        self.COLLISION = 10_000_000.0
+        self.PROXIMITY = 4000.0
+        self.CENTER_GRAVITY = 2.0
+        self.WALL_FORCE = 3000.0
+        self.WALL_MARGIN = 15
+
+    def _velocity(self, angle_idx, btype):
+        idx = angle_idx & 0x3F
+        if btype == 3 and idx < len(self.accel_table):
+            vx, vy = self.accel_table[idx]
+        elif idx < len(self.vel_table):
+            vx, vy = self.vel_table[idx]
+        else:
+            return 0.0, 0.0
+        return vx / 64.0, vy / 64.0
+
+    def _predict(self, bullets):
+        n = len(bullets)
+        if n == 0:
+            return np.zeros((0, self.PREDICT_FRAMES + 1, 2), dtype=np.float32)
+        paths = np.zeros((n, self.PREDICT_FRAMES + 1, 2), dtype=np.float32)
+        ts = np.arange(self.PREDICT_FRAMES + 1, dtype=np.float32)
+        for i, b in enumerate(bullets):
+            vx = b.vx / 64.0 if b.type == 2 else self._velocity(b.angle_index, b.type)[0]
+            vy = b.vy / 64.0 if b.type == 2 else self._velocity(b.angle_index, b.type)[1]
+            paths[i, :, 0] = float(b.x) + vx * ts
+            paths[i, :, 1] = float(b.y) + vy * ts
+        return paths
+
+    def _collision(self, px, py, pos):
+        if pos.shape[0] == 0:
+            return 0, 9999.0
+        dx = pos[:, 0] - px
+        dy = pos[:, 1] - py
+        hits = np.sum((dx >= self.HITBOX_X1) & (dx < self.HITBOX_X2) &
+                       (dy >= self.HITBOX_Y1) & (dy < self.HITBOX_Y2))
+        cx, cy = px + 7.5, py + 5.0
+        dists = np.sqrt((pos[:, 0] - cx) ** 2 + (pos[:, 1] - cy) ** 2)
+        return int(hits), float(np.min(dists))
+
+    def _score(self, px, py, paths, f):
+        if f >= paths.shape[1]:
+            f = paths.shape[1] - 1
+        hits, md = self._collision(px, py, paths[:, f, :])
+        if hits > 0:
+            return self.COLLISION + hits, True
+        d = self.PROXIMITY / max(md * md, 1.0)
+        d += math.hypot(px - self.CENTER_X, py - self.CENTER_Y) * self.CENTER_GRAVITY
+        if px < self.WALL_MARGIN: d += (self.WALL_MARGIN - px) * self.WALL_FORCE
+        elif px > self.SCREEN_W - self.WALL_MARGIN: d += (px - (self.SCREEN_W - self.WALL_MARGIN)) * self.WALL_FORCE
+        if py < self.WALL_MARGIN: d += (self.WALL_MARGIN - py) * self.WALL_FORCE
+        elif py > self.SCREEN_H - self.WALL_MARGIN: d += (py - (self.SCREEN_H - self.WALL_MARGIN)) * self.WALL_FORCE
+        return d, False
+
+    def _eval(self, px, py, dx, dy, paths):
+        s, fatal = 0.0, False
+        for f in [1, 2, 3, 4, 5]:
+            fx = max(0, min(self.SCREEN_W, px + dx * self.SPEED * f))
+            fy = max(0, min(self.SCREEN_H, py + dy * self.SPEED * f))
+            v, hit = self._score(fx, fy, paths, f)
+            s += v / (f * 0.3 + 0.3)
+            if hit: fatal = True
+        if not fatal:
+            for f in [8, 12, 18, 25, 35, 50]:
+                fx = max(0, min(self.SCREEN_W, px + dx * self.SPEED * f))
+                fy = max(0, min(self.SCREEN_H, py + dy * self.SPEED * f))
+                v, _ = self._score(fx, fy, paths, f)
+                s += v / (1.0 + f * 0.06)
+        return s, fatal
+
+    # ── Public API ─────────────────────────────────────────────────
+
+    def decide(self, px, py, bullets):
+        """
+        Decide best input bitmask for this frame.
+        
+        Args:
+            px, py: player pixel coordinates
+            bullets: list of Bullet objects (only active, angle_index != 0xFF)
+        
+        Returns:
+            int: bitmask (0–12) for G_InputState
+        """
+        if not bullets:
+            return 0
         if px <= 0 or py <= 0:
             px, py = self.CENTER_X, self.CENTER_Y
 
-        bullets = self.game.get_bullets()
-        active = [b for b in bullets if b.angle_index != 0xFF]
-
-        if not active:
-            self.game.write_int(0x00406d7c, 0)
-            return
-
-        paths = self.predict_all_bullets(active)
-
-        best_score = float('inf')
-        best_bits = 0
-        panic = False
+        paths = self._predict(bullets)
+        best_score, best_bits = float('inf'), 0
 
         for dx, dy, bits in self.MOVE_TABLE:
-            score, fatal = self.eval_move(px, py, dx, dy, paths)
-            if fatal:
-                panic = True
+            score, _ = self._eval(px, py, dx, dy, paths)
             if score < best_score:
-                best_score = score
-                best_bits = bits
+                best_score, best_bits = score, bits
 
-        # Periodic log
-        now = time.time()
-        if now - self._last_log > self._log_interval:
-            pat = self.game.get_next_pattern()
-            grz = self.game.get_active_near()
-            t = self.game.get_game_time()
-            mult = self.game.get_score_multiplier()
-            label = "PANIC" if panic else "SAFE"
-            ms = t / (mult or 1) * 12.5  # approx ms @80fps with mult=16
-            logger.info(
-                f"[{label}] P:{px:>3},{py:>3} B:{len(active):>3} "
-                f"Pat:{pat} Grz:{grz} → {kbd.get_key_name(best_bits):>8} "
-                f"score={best_score:.0f} | {ms:.0f}ms"
-            )
-            self._last_log = now
-
-        self.game.write_int(0x00406d7c, best_bits)
-
-
-# ── Auto-Restart Entry Point ──────────────────────────────────────
-
-if __name__ == "__main__":
-    import sys
-    logger.remove()
-    logger.add(sys.stderr, level="INFO")
-    logger.add("logs/ai_direct.log", rotation="10 MB", retention="5 days", level="DEBUG")
-
-    game = GameControl()
-    if not game.launch_game():
-        logger.error("Failed to launch game")
-        sys.exit(1)
-
-    ai = SuperiorAI(game)
-    logger.info("ai_direct — bitmask hijack, auto start/retry. Ctrl+C to stop.")
-
-    in_run = False
-    try:
-        while True:
-            is_playing = game.is_playing()
-            is_dead = game.is_game_over()
-
-            # ── Run start ──
-            if is_playing and not is_dead and not in_run:
-                in_run = True
-                logger.success("=== NEW RUN ===")
-
-            # ── Run end ──
-            if in_run and (not is_playing or is_dead):
-                in_run = False
-                ms = game.get_survival_ms()
-                t = game.get_game_time()
-                m = game.get_score_multiplier() or 1
-                logger.success(
-                    f"=== DEAD | {ms}ms ({ms/1000:.1f}s) | "
-                    f"Frames:{t} | Mult:{m} ==="
-                )
-                game.write_int(0x00406d7c, 0)
-                time.sleep(0.3)  # Let death animation play
-
-            # ── Auto-navigate menus ──
-            if not is_playing:
-                game.write_int(0x00406d7c, 0)
-                game.press_enter()
-                time.sleep(0.15)
-                continue
-
-            # ── Active gameplay ──
-            if in_run and is_playing:
-                ai.perform_move()
-
-    except KeyboardInterrupt:
-        game.write_int(0x00406d7c, 0)
-        logger.info("AI stopped by user.")
-    finally:
-        game.cleanup()
+        return best_bits
