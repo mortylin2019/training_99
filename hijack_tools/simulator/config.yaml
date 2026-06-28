@@ -1,0 +1,87 @@
+# simulator/config.yaml — Centralized constants matching decompiled 99.exe
+#
+# All values verified against reverse_engineering_ref/decompiled/99.exe.c
+# Address references and C line numbers included.
+
+game:
+  scr_w: 0x130       # 304 pixels
+  scr_h: 0xE0        # 224 pixels
+  raw_max_x: 0x5101  # off-screen threshold (C: *local_2c < 0x5101)
+  raw_max_y: 0x3D01  # off-screen threshold (C: local_2c[1] < 0x3d01)
+  max_entities: 300  # G_EntityArray size
+  max_bullets: 299   # G_CurrentBulletCount max (C: DAT_00406da8 < 299)
+
+player:
+  start_x: 0x98      # 152 pixels (C: G_PlayerX init)
+  start_y: 0x2C      # 44 pixels  (C: G_PlayerY init)
+  hitbox_x1: 2       # C: (iVar4 - 2U < 0xb) → dx >= 2
+  hitbox_x2: 13      # C: dx < 13
+  hitbox_y1: 0       # C: (uVar8 < 10) → dy >= 0
+  hitbox_y2: 10      # C: dy < 10
+  center_offset: 6   # C: DAT_00406d6c + 6 (player center for aim target)
+
+graze:
+  dx_thresh: 23      # C: (iVar4 + 4U < 0x17) → dx+4 < 23
+  dy_thresh: 20      # C: (uVar8 + 6 < 0x14) → dy+6 < 20
+  chain_window_ms: 1000   # C: DAT_00406e08 = uVar2 + 1000
+  chain_max: 10           # C: DAT_00406e0c max (G_PatternCounter)
+  pattern_counter_reset: 100  # C: DAT_00406e04 = 100
+
+spawn:
+  interval_ms: 3000  # C: DAT_00406dfc = uVar2 + 3000
+  edges: 4           # C: uVar1 & 3 → 0=Top,1=Bottom,2=Left,3=Right
+
+pattern:
+  check_interval_ms: 5000   # C: DAT_00406e00 = uVar2 + 5000
+  active_duration_ms: 10000 # C: DAT_00406e00 = uVar2 + 10000
+  duration_frames: 100      # C: _DAT_00406db0 = 100
+  start_chance: 0x3000  # C: if (uVar6 < 0x3000) — 37.5% of 0x8000
+  # Per-pattern spawn info (type, timer, spread)
+  # Spread: ±(spread/2) angle jitter (0=perfect aim)
+  # Timer: homing re-target interval in frames (0 for no homing)
+  info:
+    0: { type: 0, timer: 0, spread: 5 }   # Normal, no pattern
+    1: { type: 0, timer: 0, spread: 0 }   # Normal, perfect aim!
+    2: { type: 1, timer: 0x30, spread: 5 } # Homing, 48-frame re-target
+    3: { type: 1, timer: 0x20, spread: 5 } # Homing, 32-frame
+    4: { type: 1, timer: 0x10, spread: 5 } # Homing, 16-frame
+    5: { type: 1, timer: 0, spread: 5 }    # Homing, timer randomized
+    6: { type: 3, timer: 0, spread: 5 }    # Accelerating
+    7: { type: 2, timer: 0, spread: 0 }    # H-Accel, no aiming
+  # Homing re-target spread (C: FUN_00402d68(extraout_ECX, 3))
+  homing_respread: 3
+
+difficulty:
+  bullets: { 0: 30, 1: 50, 2: 100, 3: 200 }  # C: DAT_00406da8 init
+
+rng:
+  lcg_mult: 0x343FD   # C: FUN_00402000
+  lcg_add: 0x269EC3
+  lcg_mask: 0x7FFF    # C: (state >> 16) & 0x7FFF
+
+bullet:
+  inactive_marker: 0xFF      # C: angle_index == 0xff → inactive
+  type_normal: 0
+  type_homing: 1
+  type_h_accel: 2   # Homing-Acceleration (NOT bounce)
+  type_accel: 3
+  # Type 2 (H-Accel) caps
+  vx_cap: 96        # C: vx < '`' (0x60)
+  vy_cap: 96
+  max_bounce: 4     # C: if (DAT_00406dac < 4) — max Type 2 on screen
+  # Homing steering thresholds
+  steer_diff_near: 0x19   # C: < 25 → steer +1
+  steer_diff_lose: 0x28   # C: < 40 → lose lock (type→0), else steer -1
+  # Homing counter phase jitter (C: *(byte *)(local_2c + 3) = (byte)uVar8 & 7)
+  homing_phase_mask: 7
+  # Pixel conversion
+  raw_shift: 6       # C: raw >> 6
+  pixel_offset: 4    # C: (raw >> 6) - 4
+
+velocity:
+  table_addr: 0x00405d74   # 64 entries × 12 bytes (3 i32s)
+  accel_table_addr: 0x00406074
+  num_angles: 64
+  entries_per_angle: 3     # vx, vy, tan_ratio (i32 each)
+  # Octant search range (C: do { ... } while (iVar2 < 7))
+  octant_search_range: 7

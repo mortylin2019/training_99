@@ -25,11 +25,31 @@ A bullet-hell survival game. Objective: avoid bullets. One hit = death. Features
 
 | Value | Multiplier | Frame rate | String |
 |---|---|---|---|
-| 0 | 16 (0x10) | 80 FPS | (Standard) |
-| 1 | 12 (0xC) | 80 FPS | "なんとなく80フレーム/秒" |
+| 0 | 16 (0x10) | ~80 FPS | (Standard) |
+| 1 | 12 (0xC) | ~80 FPS | "なんとなく80フレーム/秒" |
 | 2 | 0 | Unlocked | "勢い余って全速力" |
 
-When multiplier = 0: score = raw survival milliseconds, game runs at max speed. The multiplier is stored at `G_ScoreMultiplier` (`0x00406d8c`) and set during init from ScoreType.
+When multiplier = 0: score = raw survival milliseconds, game runs at max CPU speed.
+Multiplier is stored at `G_ScoreMultiplier` (`0x00406d8c`), set during init from ScoreType.
+
+### Natural Difficulty Ramp (during gameplay)
+
+The game has no explicit "level" system — difficulty is fixed. But difficulty increases naturally:
+
+1. **Bullet count ramps**: `G_CurrentBulletCount` starts at the difficulty level
+   (30/50/100/200) and increments every 3 seconds on spawn, up to 299 max.
+   → More bullets on screen over time.
+
+2. **Patterns activate randomly**: 12.5% chance every 5 seconds to start a pattern
+   (Patterns 1-7 introduce harder bullet types: homing, accelerating, chasing).
+   Patterns last 100 frames (~1.25s), then cooldown 5s.
+
+3. **Bullet recycling**: Off-screen bullets respawn immediately instead of being
+   removed — the bullet count only increases, never decreases.
+
+This means a 60-second run has ~75-100 bullets with ~3-5 pattern activations
+(mixing in homing/accel types), while a 10-second run has ~50 bullets with
+no patterns active.
 
 ## 3. Game State Machine — `G_GameState` at `0x00406d74`
 

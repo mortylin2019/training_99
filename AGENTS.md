@@ -158,7 +158,15 @@ There are three ways to control the player, from worst to best:
 
 ---
 
-## Reverse Engineering Tools
+## Reverse Engineering Authority
+
+| Source | Role | Location |
+|--------|------|----------|
+| **Assembly (.asm)** | **TRUTH** — exact instruction-level behavior | `reverse_engineering_ref/asm/` |
+| **Annotated pseudocode** | Human-readable spec derived from assembly | `reverse_engineering_ref/asm/ANNOTATED.md` |
+| **Decompiled C** | Reference only — rough sketch, has Ghidra artifacts | `reverse_engineering_ref/decompiled/99.exe.c` |
+
+**Rule**: When in doubt, the `.asm` files are authoritative. The C code may have variable swaps, uninitialized variables, and incorrect control flow from Ghidra's decompiler. Verify against assembly with `tools/dump_asm.py`.
 
 - `breakdown_and_translate.py`: Splits monolithic decompiled C into logical modules, decodes Shift-JIS strings, renames variables
 - `reverse_data.py`: Extracts encrypted ranking table, exports as JSON

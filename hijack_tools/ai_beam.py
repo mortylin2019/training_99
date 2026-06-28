@@ -31,10 +31,9 @@ PROXIMITY_VAL = 4000.0
 CENTER_W = 2.0
 WALL_W = 3000.0
 
-# Safety margin: 2px per side (real 11×10 → simulated 15×14, +91% area)
-# Gives beam search room to route between converging bullet streams
-HIT_X1, HIT_X2 = 0.0, 15.0
-HIT_Y1, HIT_Y2 = -2.0, 12.0
+# Exact hitbox from decompiled code: 2 <= dx < 13, 0 <= dy < 10
+HIT_X1, HIT_X2 = 2.0, 13.0
+HIT_Y1, HIT_Y2 = 0.0, 10.0
 
 
 @njit
