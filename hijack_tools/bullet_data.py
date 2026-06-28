@@ -11,6 +11,7 @@ class Bullet:
     index: int        # Offset 0x0C
     vx: int           # Offset 0x0D - Direct speed for Type 2
     vy: int           # Offset 0x0E - Direct speed for Type 2
+    dist_to_player: float = 0.0 # Distance to player in pixels
 
     @property
     def x(self) -> int:
@@ -20,7 +21,13 @@ class Bullet:
     def y(self) -> int:
         return (self.raw_y >> 6) - 4
 
+    def update_dist(self, px, py):
+        """Update distance to player using pixel coordinates."""
+        dx = self.x - px
+        dy = self.y - py
+        self.dist_to_player = (dx*dx + dy*dy)**0.5
+
     def __repr__(self):
         # Type 2 uses simple vx/vy, others use angle_index to look up vectors
         move_info = f"v={self.vx},{self.vy}" if self.type == 2 else f"angle={self.angle_index}"
-        return f"({self.x},{self.y},T{self.type},{move_info})"
+        return f"({self.x},{self.y},T{self.type},D{self.dist_to_player:.1f},{move_info})"

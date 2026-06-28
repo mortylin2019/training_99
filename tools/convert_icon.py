@@ -23,6 +23,6 @@ def convert_ico_to_png(ico_path, png_path):
         print(f"Failed to convert: {e}")
 
 if __name__ == "__main__":
-    ico_file = r"c:\git\training_99\flask_app\static\player.ico"
-    png_file = r"c:\git\training_99\flask_app\static\player.png"
+    ico_file = r"c:\git\training_99\reverse_engineering_ref\resources\player.ico"
+    png_file = r"c:\git\training_99\doc\player.png"
     convert_ico_to_png(ico_file, png_file)

@@ -5,7 +5,7 @@ import os
 
 # Configuration
 HEX_FILE_PATH = r'c:\git\training_99\reverse_engineering_ref\decompiled\004063e4_hex'
-OUTPUT_JSON_PATH = r'c:\git\training_99\flask_app\static\rankings.json'
+OUTPUT_JSON_PATH = r'c:\git\training_99\doc\game_ranking.json'
 OUTPUT_TXT_PATH = r'c:\git\training_99\doc\game_ranking_dump.txt'
 KNOWN_TEXT = "便所掃除" # "Toilet Cleaning" - The anchor for verification
 

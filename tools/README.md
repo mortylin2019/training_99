@@ -19,16 +19,16 @@ This directory contains the primary scripts used for analyzing `99.exe` and gene
   - Translates function and variable names based on a predefined symbol map.
 
 ### 2. `reverse_data.py`
-**Purpose**: Data extraction for the Flask web application.
+**Purpose**: Extract ranking data from the game hex dump.
 - **Input**:
   - `reverse_engineering_ref/decompiled/004063e4_hex`
 - **Output**:
-  - `flask_app/static/rankings.json` (Game ranking logic for the web UI)
+  - `doc/game_ranking.json` (Ranking data in JSON)
   - `doc/game_ranking_dump.txt` (Human readable dump)
 - **Features**:
   - Parses the game's internal ranking table (starting at offset 959).
   - Decrypts the XOR-obfuscated data.
-  - Exports the data in JSON format for the web frontend.
+  - Exports the data in JSON format.
 
 ## Usage
 
@@ -37,7 +37,7 @@ To regenerate the C code breakdown:
 uv run tools/breakdown_and_translate.py
 ```
 
-To update the web app data:
+To extract ranking data:
 ```bash
 uv run tools/reverse_data.py
 ```
