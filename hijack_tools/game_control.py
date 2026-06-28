@@ -453,9 +453,8 @@ class GameControl:
         """Sets the input state and logs it."""
         move_name = kbd.get_key_name(bits)
         
-        # We can enable spammy logging here if requested, or just debug
         if bits != 0:
-            logger.debug(f"Input Set: {move_name} (Bits: {bits})")
+            logger.trace(f"Input Set: {move_name} (Bits: {bits})")
             
         self.write_int(ADDR_INPUT_STATE, bits)
 
@@ -487,9 +486,9 @@ class GameControl:
             bullets.append(b)
             active_count += 1
             
-            # DEBUG: Log every 10th bullet to verify coordinates
+            # Per-bullet details are trace-level only (floods console otherwise)
             if i % 10 == 0:
-                logger.debug(f"P({px},{py}) Bullet[{i}]: X={b.x} Y={b.y} Dist={b.dist_to_player:.1f} Type={b.type}")
+                logger.trace(f"P({px},{py}) Bullet[{i}]: X={b.x} Y={b.y} Dist={b.dist_to_player:.1f} Type={b.type}")
                 
         return bullets
 

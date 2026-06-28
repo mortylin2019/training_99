@@ -24,7 +24,11 @@ except ImportError:
     from hijack_tools.game_control import GameControl
 
 logger.remove()
-logger.add(sys.stderr, level="DEBUG")
+# Console: INFO+ only — clean, focused output
+logger.add(sys.stderr, level="INFO", format="<level>{message}</level>")
+# File: DEBUG+ — full details for post-mortem analysis
+logger.add("logs/multi_runner_debug.log", level="DEBUG", rotation="10 MB",
+           format="{time:HH:mm:ss.SSS} | {level:7} | {message}")
 
 
 def tile_window(hwnd, col, row, cols, rows):
