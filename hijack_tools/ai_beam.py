@@ -20,7 +20,7 @@ SPEED = 1
 
 # Optimal: 160f lookahead covers bullet travel time
 BEAM_DEPTH = 40     # steps
-BEAM_WIDTH = 8      # top-K paths  
+BEAM_WIDTH = 12     # top-K paths (optimal: balances diversity vs speed)
 CHECK_EVERY = 4     # every 4f → 160f = 2.0s lookahead
 
 # Scoring weights
@@ -39,8 +39,7 @@ HIT_Y1, HIT_Y2 = 0.0, 10.0
 @njit
 def _score_pos(px, py, bullets_t):
     """
-    Directional danger scoring.
-    Bullets are dangerous in their direction of travel — models an ellipse.
+    Inverse-square danger scoring with safety margin.
     Scores: lower = safer. Returns (score, is_fatal).
     """
     B = bullets_t.shape[0]
@@ -60,7 +59,7 @@ def _score_pos(px, py, bullets_t):
         # Weighted danger: closer = more dangerous, decays with distance²
         d2 = dx * dx + dy * dy
         if d2 < 4.0:
-            d2 = 4.0  # cap minimum distance to avoid explosion
+            d2 = 4.0
         danger += DANGER_BASE / d2
 
     # Center pull (gentle)
@@ -174,14 +173,12 @@ class BeamAI:
         by = np.array([b.y for b in bullets], dtype=np.float64)
         ang = np.array([b.angle_index for b in bullets], dtype=np.int32)
 
-        vel = self._velocity(ang)
+        vel = self._velocity(ang)  # (N, 2) in pixels/frame
         ts = np.arange(T, dtype=np.float64)
         paths = np.zeros((n, T, 2), dtype=np.float64)
         paths[:, :, 0] = bx[:, None] + vel[:, 0, None] * ts[None, :]
         paths[:, :, 1] = by[:, None] + vel[:, 1, None] * ts[None, :]
 
-        # Adjust for curvature: bullets on screen edges tend to aim inward
-        # This is a fair heuristic — human players can see spawn patterns
         return paths
 
     def decide(self, px, py, bullets):
