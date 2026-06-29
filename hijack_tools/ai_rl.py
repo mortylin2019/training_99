@@ -27,6 +27,7 @@ MOVES = np.array([
 ], dtype=np.int32)
 BITS = np.array([0, 1, 8, 2, 4, 3, 5, 10, 12], dtype=np.int32)
 N_ACTIONS = 9
+FRAME_SKIP = 16  # repeat action 16 frames (~0.2s), 5 decisions/sec at 80 FPS
 
 
 def encode_state(px, py, bullets, graze=0, frame=0, prev_density=None):
@@ -197,7 +198,8 @@ class RLAgent:
 
 # ── Collection worker (PyTorch CNN, runs in subprocess) ─────
 def _collect_worker(args):
-    """Run N episodes with PyTorch CNN, return (transitions, ep_frames)."""
+    """Run N episodes with PyTorch CNN + frame-skip (16 frames per decision).
+    Returns (transitions, ep_frames)."""
     model_state, epsilon, n_eps, difficulty, max_frames, seed_base = args
 
     agent = RLAgent()
@@ -211,14 +213,14 @@ def _collect_worker(args):
 
     transitions = []
     ep_frames = []
+    max_decisions = max_frames // FRAME_SKIP  # 500 decisions = 100s
     for ep in range(n_eps):
         cs = CSimulator(difficulty, seed_base + ep)
-        # First frame state via Python, then C handles rest
         state = encode_state(cs.px, cs.py, cs.get_visible_bullets())
         grid_buf = np.zeros((N_CHANNELS, GRID_H, GRID_W), dtype=np.float32)
         frames = 0
         prev_density = None
-        for f in range(max_frames):
+        for d in range(max_decisions):
             if random.random() < epsilon:
                 action_idx = random.randint(0, N_ACTIONS - 1)
             else:
@@ -227,8 +229,17 @@ def _collect_worker(args):
                     action_idx = agent.q_net(s).argmax(dim=1).item()
 
             bits = int(BITS[action_idx])
-            # C computes grid state in-place — eliminates Python encode_state!
-            alive = cs.step_with_grid(bits, grid_buf)
+            # Run FRAME_SKIP frames, accumulate reward, stop early on death
+            skip_reward = 0.0
+            alive = True
+            for _ in range(FRAME_SKIP):
+                alive = cs.step_with_grid(bits, grid_buf)
+                frames += 1
+                if not alive:
+                    skip_reward += -5.0 + frames * 0.001  # death penalty + survival bonus
+                    break
+                skip_reward += 0.1  # per-frame survival reward
+
             # Channel 1 = previous density (motion cue)
             if prev_density is None:
                 prev_density = state[0].copy()
@@ -236,15 +247,8 @@ def _collect_worker(args):
             prev_density = grid_buf[0].copy()
             next_state = grid_buf.copy()
 
-            reward = 0.1  # stronger survival signal
-            if not alive:
-                reward = -5.0 + f * 0.001  # death penalty + survival bonus
-            else:
-                reward += f * 0.0001  # tiny increasing bonus per frame alive
-
-            transitions.append((state, action_idx, reward, next_state, not alive))
+            transitions.append((state, action_idx, skip_reward, next_state, not alive))
             state = next_state
-            frames = f + 1
             if not alive:
                 break
         ep_frames.append(frames)

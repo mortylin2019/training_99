@@ -334,6 +334,11 @@ EXPORT GameState* sim_create(int difficulty, int seed) {
     s->rng_state = seed & 0xFFFFFFFF;
     s->spawn_interval = 240;
     reset_state(s);
+
+    /* Pre-fill all bullet slots — match real game's immediate spawn */
+    for (int i = 0; i < s->bullet_count; i++) {
+        spawn_at(s, i);
+    }
     return s;
 }
 
@@ -715,4 +720,301 @@ EXPORT int sim_run_episode(GameState* s, int max_frames,
         graze = s->active_near;
     }
     return max_frames;
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * BEAM SEARCH — CHECK_EVERY=1, DEPTH=160 (2s), WIDTH=12
+ * Linear bullet prediction using velocity tables.
+ * Returns bitmask for best first move (0-12).
+ * ═══════════════════════════════════════════════════════════ */
+#define BS_DEPTH  160   /* 2.0s at 80 FPS              */
+#define BS_WIDTH  12    /* top-K paths                 */
+#define BS_MAX_B  150   /* max bullets to predict      */
+
+/* ── Scoring toggles (match algo_config.py) ──────────────── */
+#define USE_INVERSE_SQUARE 1    /* 1/d² bullet danger         */
+#define USE_COLLISION      1    /* hitbox instant-death       */
+#define USE_CENTER_PULL    1    /* gentle pull to center      */
+#define USE_WALL_PENALTY   1    /* edge penalty               */
+#define USE_SAFETY_MARGIN  1    /* extra hitbox clearance     */
+#define USE_TIME_WEIGHTING 1    /* future discount            */
+#define USE_TIEBREAK       1    /* positional hash            */
+
+/* Strong center pull (matching algo_config.py CENTER_PULL=5.0) */
+#define BS_CENTER_PULL    0.3
+
+static const int bs_moves[9][2] = {
+    {0,0}, {-1,0}, {1,0}, {0,-1}, {0,1},
+    {-1,-1}, {-1,1}, {1,-1}, {1,1}
+};
+static const int bs_bits[9] = {0, 1, 8, 2, 4, 3, 5, 10, 12};
+
+EXPORT int sim_beam_search(GameState* s) {
+    double px0 = (double)s->px;
+    double py0 = (double)s->py;
+
+    /* ── Collect active bullets + compute velocities ────── */
+    int nb = 0;
+    int bx[BS_MAX_B], by[BS_MAX_B];
+    double bvx[BS_MAX_B], bvy[BS_MAX_B];
+    for (int i = 0; i < s->bullet_count && i < MAX_ENTITIES && nb < BS_MAX_B; i++) {
+        Bullet *b = &s->bullets[i];
+        if (b->angle_index == INACTIVE) continue;
+        bx[nb]  = (b->raw_x >> RAW_SHIFT) - PIXEL_OFFSET;
+        by[nb]  = (b->raw_y >> RAW_SHIFT) - PIXEL_OFFSET;
+        int idx = b->angle_index & 63;
+        bvx[nb] = VEL_TABLE[idx][0] / 64.0;  /* px/frame */
+        bvy[nb] = VEL_TABLE[idx][1] / 64.0;
+        nb++;
+    }
+
+    /* ── Precompute bullet paths: [nb][BS_DEPTH+1][x,y] ── */
+    int path_stride = BS_DEPTH + 1;
+    double (*paths)[2] = (double(*)[2])malloc(nb * path_stride * 2 * sizeof(double));
+    if (!paths) return 0;
+
+    for (int i = 0; i < nb; i++) {
+        for (int t = 0; t <= BS_DEPTH; t++) {
+            paths[i * path_stride + t][0] = (double)bx[i] + bvx[i] * t;
+            paths[i * path_stride + t][1] = (double)by[i] + bvy[i] * t;
+        }
+    }
+
+    /* ── Beam arrays ────────────────────────────────────── */
+    double beam_px[BS_WIDTH], beam_py[BS_WIDTH];
+    int    beam_first[BS_WIDTH];
+    double beam_score[BS_WIDTH];
+    int    beam_count;
+
+    beam_px[0] = px0;  beam_py[0] = py0;
+    beam_first[0] = -1;
+    beam_score[0] = 0.0;
+    for (int i = 1; i < BS_WIDTH; i++) beam_score[i] = 1e30;
+    beam_count = 1;
+
+    /* Candidate buffers */
+    double cand_px[BS_WIDTH * 9], cand_py[BS_WIDTH * 9];
+    int    cand_first[BS_WIDTH * 9];
+    double cand_score[BS_WIDTH * 9];
+
+    /* ── Beam search loop ───────────────────────────────── */
+    for (int d = 0; d < BS_DEPTH; d++) {
+        int t = d + 1;  /* bullet path frame index */
+        int ci = 0;
+
+        for (int bi = 0; bi < beam_count; bi++) {
+            for (int mi = 0; mi < 9; mi++) {
+                double nx = beam_px[bi] + bs_moves[mi][0];
+                double ny = beam_py[bi] + bs_moves[mi][1];
+                if (nx < 0.0) nx = 0.0; if (nx > (double)SCR_W) nx = (double)SCR_W;
+                if (ny < 0.0) ny = 0.0; if (ny > (double)SCR_H) ny = (double)SCR_H;
+
+                /* Danger scoring (togglable) */
+                double danger = 0.0;
+                int fatal = 0;
+                for (int i = 0; i < nb && !fatal; i++) {
+                    double dx = paths[i * path_stride + t][0] - nx;
+                    double dy = paths[i * path_stride + t][1] - ny;
+#if USE_COLLISION
+                    if (dx >= (double)HIT_X1 && dx < (double)HIT_X2
+                            && dy >= (double)HIT_Y1 && dy < (double)HIT_Y2) {
+                        danger = 1e8;  fatal = 1;  break;
+                    }
+#endif
+#if USE_INVERSE_SQUARE
+                    double d2 = dx * dx + dy * dy;
+                    if (d2 < 4.0) d2 = 4.0;
+                    danger += 2000.0 / d2;
+#endif
+                }
+
+#if USE_CENTER_PULL
+                danger += fabs(nx - 152.0) * BS_CENTER_PULL;
+                danger += fabs(ny - 44.0) * BS_CENTER_PULL;
+#endif
+
+#if USE_WALL_PENALTY
+                if (nx < 10.0)      danger += (10.0 - nx) * 5000.0;
+                else if (nx > 294.0) danger += (nx - 294.0) * 5000.0;
+                if (ny < 10.0)      danger += (10.0 - ny) * 5000.0;
+                else if (ny > 214.0) danger += (ny - 214.0) * 5000.0;
+#endif
+
+                /* Time weighting + deterministic tiebreak */
+#if USE_TIME_WEIGHTING
+                double w = 1.0 / (0.5 + t * 0.03);
+#else
+                double w = 1.0;
+#endif
+#if USE_TIEBREAK
+                double tb = ((int)(nx * 7919) ^ (int)(ny * 6271)) & 0xFFF;
+#else
+                double tb = 0.0;
+#endif
+                double total = beam_score[bi] + danger * w + tb * 1e-6;
+
+                cand_px[ci]    = nx;
+                cand_py[ci]    = ny;
+                cand_first[ci] = (beam_first[bi] >= 0) ? beam_first[bi] : mi;
+                cand_score[ci] = total;
+                ci++;
+            }
+        }
+
+        /* Keep top BS_WIDTH */
+        int top[BS_WIDTH];
+        for (int k = 0; k < BS_WIDTH; k++) top[k] = -1;
+        for (int i = 0; i < ci; i++) {
+            for (int k = 0; k < BS_WIDTH; k++) {
+                if (top[k] < 0 || cand_score[i] < cand_score[top[k]]) {
+                    for (int j = BS_WIDTH - 1; j > k; j--) top[j] = top[j - 1];
+                    top[k] = i;
+                    break;
+                }
+            }
+        }
+        int nc = 0;
+        for (int k = 0; k < BS_WIDTH && top[k] >= 0; k++) {
+            beam_px[k]    = cand_px[top[k]];
+            beam_py[k]    = cand_py[top[k]];
+            beam_first[k] = cand_first[top[k]];
+            beam_score[k] = cand_score[top[k]];
+            nc++;
+        }
+        beam_count = nc;
+    }
+
+    free(paths);
+    int best = (beam_first[0] >= 0) ? beam_first[0] : 0;
+    return bs_bits[best];
+}
+
+/* ── Raw beam search from bullet arrays (no GameState needed) ── */
+EXPORT int sim_beam_search_raw(int px, int py,
+                                int n_bullets,
+                                int* bx, int* by, int* angle_indices) {
+    double px0 = (double)px;
+    double py0 = (double)py;
+
+    /* Limit bullet count */
+    int nb = n_bullets;
+    if (nb > BS_MAX_B) nb = BS_MAX_B;
+
+    /* Compute velocities from angle indices */
+    double bvx[BS_MAX_B], bvy[BS_MAX_B];
+    for (int i = 0; i < nb; i++) {
+        int idx = angle_indices[i] & 63;
+        bvx[i] = VEL_TABLE[idx][0] / 64.0;
+        bvy[i] = VEL_TABLE[idx][1] / 64.0;
+    }
+
+    /* ── Precompute bullet paths ── */
+    int path_stride = BS_DEPTH + 1;
+    double (*paths)[2] = (double(*)[2])malloc(nb * path_stride * 2 * sizeof(double));
+    if (!paths) return 0;
+
+    for (int i = 0; i < nb; i++) {
+        for (int t = 0; t <= BS_DEPTH; t++) {
+            paths[i * path_stride + t][0] = (double)bx[i] + bvx[i] * t;
+            paths[i * path_stride + t][1] = (double)by[i] + bvy[i] * t;
+        }
+    }
+
+    /* ── Beam arrays ────────────────────────────────────── */
+    double beam_px[BS_WIDTH], beam_py[BS_WIDTH];
+    int    beam_first[BS_WIDTH];
+    double beam_score[BS_WIDTH];
+    int    beam_count;
+    beam_px[0] = px0;  beam_py[0] = py0;
+    beam_first[0] = -1;  beam_score[0] = 0.0;
+    for (int i = 1; i < BS_WIDTH; i++) beam_score[i] = 1e30;
+    beam_count = 1;
+
+    double cand_px[BS_WIDTH * 9], cand_py[BS_WIDTH * 9];
+    int    cand_first[BS_WIDTH * 9];
+    double cand_score[BS_WIDTH * 9];
+
+    /* ── Beam search loop ───────────────────────────────── */
+    for (int d = 0; d < BS_DEPTH; d++) {
+        int t = d + 1;
+        int ci = 0;
+        for (int bi = 0; bi < beam_count; bi++) {
+            for (int mi = 0; mi < 9; mi++) {
+                double nx = beam_px[bi] + bs_moves[mi][0];
+                double ny = beam_py[bi] + bs_moves[mi][1];
+                if (nx < 0.0) nx = 0.0; if (nx > (double)SCR_W) nx = (double)SCR_W;
+                if (ny < 0.0) ny = 0.0; if (ny > (double)SCR_H) ny = (double)SCR_H;
+
+                /* Danger scoring (togglable) */
+                double danger = 0.0;
+                int fatal = 0;
+                for (int i = 0; i < nb && !fatal; i++) {
+                    double dx = paths[i * path_stride + t][0] - nx;
+                    double dy = paths[i * path_stride + t][1] - ny;
+#if USE_COLLISION
+                    if (dx >= (double)HIT_X1 && dx < (double)HIT_X2
+                            && dy >= (double)HIT_Y1 && dy < (double)HIT_Y2) {
+                        danger = 1e8;  fatal = 1;  break;
+                    }
+#endif
+#if USE_INVERSE_SQUARE
+                    double d2 = dx * dx + dy * dy;
+                    if (d2 < 4.0) d2 = 4.0;
+                    danger += 2000.0 / d2;
+#endif
+                }
+#if USE_CENTER_PULL
+                danger += fabs(nx - 152.0) * BS_CENTER_PULL;
+                danger += fabs(ny - 44.0) * BS_CENTER_PULL;
+#endif
+#if USE_WALL_PENALTY
+                if (nx < 10.0)      danger += (10.0 - nx) * 5000.0;
+                else if (nx > 294.0) danger += (nx - 294.0) * 5000.0;
+                if (ny < 10.0)      danger += (10.0 - ny) * 5000.0;
+                else if (ny > 214.0) danger += (ny - 214.0) * 5000.0;
+#endif
+
+#if USE_TIME_WEIGHTING
+                double w = 1.0 / (0.5 + t * 0.03);
+#else
+                double w = 1.0;
+#endif
+#if USE_TIEBREAK
+                double tb = ((int)(nx * 7919) ^ (int)(ny * 6271)) & 0xFFF;
+#else
+                double tb = 0.0;
+#endif
+                double total = beam_score[bi] + danger * w + tb * 1e-6;
+
+                cand_px[ci]    = nx;
+                cand_py[ci]    = ny;
+                cand_first[ci] = (beam_first[bi] >= 0) ? beam_first[bi] : mi;
+                cand_score[ci] = total;
+                ci++;
+            }
+        }
+        int top[BS_WIDTH];
+        for (int k = 0; k < BS_WIDTH; k++) top[k] = -1;
+        for (int i = 0; i < ci; i++) {
+            for (int k = 0; k < BS_WIDTH; k++) {
+                if (top[k] < 0 || cand_score[i] < cand_score[top[k]]) {
+                    for (int j = BS_WIDTH - 1; j > k; j--) top[j] = top[j - 1];
+                    top[k] = i;  break;
+                }
+            }
+        }
+        int nc = 0;
+        for (int k = 0; k < BS_WIDTH && top[k] >= 0; k++) {
+            beam_px[k]    = cand_px[top[k]];
+            beam_py[k]    = cand_py[top[k]];
+            beam_first[k] = cand_first[top[k]];
+            beam_score[k] = cand_score[top[k]];
+            nc++;
+        }
+        beam_count = nc;
+    }
+
+    free(paths);
+    int best = (beam_first[0] >= 0) ? beam_first[0] : 0;
+    return bs_bits[best];
 }

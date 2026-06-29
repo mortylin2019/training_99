@@ -2,76 +2,62 @@
 ai_beam.py — JIT-compiled Beam Search with directional danger prediction.
 
 Models bullet threats based on their movement direction (fair — human-visible).
-Uses adaptive beam depth based on bullet density.
-No memory cheats, no teleport, 1px/frame movement only.
+Auto-detects C engine DLL for CHECK_EVERY=1 search, falls back to Python.
+Config: see algo_config.py
 """
 import numpy as np
 from numba import njit
+from algo_config import (
+    MOVES, BITS, N_ACTIONS, SPEED,
+    SCR_W, SCR_H, CTR_X, CTR_Y,
+    BEAM_DEPTH, BEAM_WIDTH, CHECK_EVERY,
+    C_BEAM_DEPTH, C_CHECK_EVERY,
+    COLLISION_VAL, DANGER_BASE, DANGER_DECAY, SAFETY_MARGIN,
+    CENTER_PULL, WALL_PENALTY, WALL_MARGIN,
+    HIT_X1, HIT_X2, HIT_Y1, HIT_Y2,
+    TIME_WEIGHT_BASE, TIME_WEIGHT_RATE,
+    USE_INVERSE_SQUARE, USE_COLLISION, USE_CENTER_PULL,
+    USE_WALL_PENALTY, USE_SAFETY_MARGIN,
+    USE_TIME_WEIGHTING, USE_TIEBREAK,
+    USE_C_BEAM,
+)
 
-MOVES = np.array([
-    [ 0,  0], [-1,  0], [ 1,  0], [ 0, -1], [ 0,  1],
-    [-1, -1], [-1,  1], [ 1, -1], [ 1,  1],
-], dtype=np.int32)
-BITS = np.array([0, 1, 8, 2, 4, 3, 5, 10, 12], dtype=np.int32)
+# Convert to numpy arrays for numba JIT
+MOVES = np.array(MOVES, dtype=np.int32)
+BITS = np.array(BITS, dtype=np.int32)
 
-SCR_W, SCR_H = 0x130, 0xE0
-CTR_X, CTR_Y = 0x98, 0x2C
-SPEED = 1
-
-# Optimal: 160f lookahead covers bullet travel time
-BEAM_DEPTH = 40     # steps
-BEAM_WIDTH = 12     # top-K paths (optimal: balances diversity vs speed)
-CHECK_EVERY = 4     # every 4f → 160f = 2.0s lookahead
-
-# Scoring weights
-COLLISION_VAL = 1e8
-DANGER_BASE = 2000.0       # base danger per bullet in path
-DANGER_DECAY = 0.85        # exponential decay per frame
-SAFETY_MARGIN = 2.0        # extra clearance around hitbox
-CENTER_PULL = 0.3          # gentle pull toward center
-WALL_PENALTY = 5000.0
-
-# Exact hitbox: 2 <= dx < 13, 0 <= dy < 10
-HIT_X1, HIT_X2 = 2.0, 13.0
-HIT_Y1, HIT_Y2 = 0.0, 10.0
+# Compute effective margins based on toggles
+_EFF_MARGIN = SAFETY_MARGIN if USE_SAFETY_MARGIN else 0.0
 
 
 @njit
 def _score_pos(px, py, bullets_t):
     """
-    Inverse-square danger scoring with safety margin.
-    Scores: lower = safer. Returns (score, is_fatal).
+    Full danger scoring — used by Python fallback (CHECK_EVERY=4).
+    Needs all components for safety at 4px resolution.
     """
     B = bullets_t.shape[0]
     danger = 0.0
-
     for i in range(B):
         bx = bullets_t[i, 0]
         by = bullets_t[i, 1]
-        dx = bx - px
-        dy = by - py
-
+        dx = bx - px; dy = by - py
+        # Collision check with safety margin
         if (dx >= HIT_X1 - SAFETY_MARGIN and dx < HIT_X2 + SAFETY_MARGIN
                 and dy >= HIT_Y1 - SAFETY_MARGIN and dy < HIT_Y2 + SAFETY_MARGIN):
             return COLLISION_VAL, True
-
+        # Inverse-square danger
         d2 = dx * dx + dy * dy
-        if d2 < 4.0:
-            d2 = 4.0
+        if d2 < 4.0: d2 = 4.0
         danger += DANGER_BASE / d2
-
-    danger += abs(px - CTR_X) * CENTER_PULL
-    danger += abs(py - CTR_Y) * CENTER_PULL
-
-    if px < 10.0:
-        danger += (10.0 - px) * WALL_PENALTY
-    elif px > SCR_W - 10.0:
-        danger += (px - (SCR_W - 10.0)) * WALL_PENALTY
-    if py < 10.0:
-        danger += (10.0 - py) * WALL_PENALTY
-    elif py > SCR_H - 10.0:
-        danger += (py - (SCR_H - 10.0)) * WALL_PENALTY
-
+    # Center pull (Python beam uses proven mild value, ignore config)
+    danger += abs(px - CTR_X) * 0.3
+    danger += abs(py - CTR_Y) * 0.3
+    # Wall penalty
+    if px < 10.0: danger += (10.0 - px) * 5000.0
+    elif px > SCR_W - 10.0: danger += (px - (SCR_W - 10.0)) * 5000.0
+    if py < 10.0: danger += (10.0 - py) * 5000.0
+    elif py > SCR_H - 10.0: danger += (py - (SCR_H - 10.0)) * 5000.0
     return danger, False
 
 
@@ -120,12 +106,10 @@ def _beam_search(px0, py0, paths):
                 if ny > SCR_H: ny = float(SCR_H)
 
                 s, fatal = _score_pos(nx, ny, bullets_t)
-                if fatal:
-                    s += 1e9
-                w = 1.0 / (0.5 + t * 0.03)
-                # Tiny positional hash breaks ties, prevents deterministic death loops
-                tiebreak = ((int(nx * 7919) ^ int(ny * 6271)) & 0xFFF) * 1e-6
-                total = beam_score[bi] + s * w + tiebreak
+                if fatal: s += 1e9
+                w = 1.0 / (TIME_WEIGHT_BASE + t * TIME_WEIGHT_RATE)
+                tb = ((int(nx * 7919) ^ int(ny * 6271)) & 0xFFF) * 1e-6
+                total = beam_score[bi] + s * w + tb
 
                 candidates_px[ci] = nx
                 candidates_py[ci] = ny
@@ -208,10 +192,23 @@ def _max_gap_move(px, py, bullets_arr):
 
 
 class BeamAI:
-    """Hybrid AI: max-gap escape when surrounded, beam search otherwise."""
+    """
+    Beam search AI. Uses C engine (CHECK_EVERY=1) when DLL available,
+    falls back to Python beam (CHECK_EVERY=4) otherwise.
+    """
 
     def __init__(self, vel_table=None, accel_table=None):
         self.vel_table = np.array(vel_table or [(0, 0)], dtype=np.float32)
+        self._c_available = False
+        try:
+            from hijack_tools.simulator.c_wrapper import CSimulator
+            self._c_available = True
+        except Exception:
+            try:
+                from simulator.c_wrapper import CSimulator
+                self._c_available = True
+            except Exception:
+                pass
 
     def _velocity(self, angles):
         idx = np.clip((angles & 0x3F).astype(np.int32), 0, len(self.vel_table) - 1)
@@ -238,5 +235,18 @@ class BeamAI:
             return 0
         if px <= 0 or py <= 0:
             px, py = CTR_X, CTR_Y
+
+        # ── C engine path (CHECK_EVERY=1, 1px steps) ──
+        if USE_C_BEAM and self._c_available:
+            active = [(b.x, b.y, b.angle_index) for b in bullets
+                      if b.angle_index != 0xFF]
+            if active:
+                try:
+                    from hijack_tools.simulator.c_wrapper import c_beam_search
+                except ImportError:
+                    from simulator.c_wrapper import c_beam_search
+                return c_beam_search(px, py, active)
+
+        # ── Python fallback (CHECK_EVERY=4, 4px steps) ──
         paths = self._predict(bullets)
         return int(BITS[_beam_search(float(px), float(py), paths)])

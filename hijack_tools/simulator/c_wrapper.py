@@ -75,6 +75,15 @@ AI_CALLBACK = ctypes.CFUNCTYPE(
 _lib.sim_run_episode.argtypes = [ctypes.c_void_p, ctypes.c_int, AI_CALLBACK]
 _lib.sim_run_episode.restype = ctypes.c_int
 
+# ── C beam search (CHECK_EVERY=1, DEPTH=160, WIDTH=12) ─────
+_lib.sim_beam_search.argtypes = [ctypes.c_void_p]
+_lib.sim_beam_search.restype = ctypes.c_int
+
+_lib.sim_beam_search_raw.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
+    ctypes.POINTER(ctypes.c_int)]
+_lib.sim_beam_search_raw.restype = ctypes.c_int
+
 
 class Bullet:
     """Bullet data matching simulator/bullet.py Bullet interface."""
@@ -151,6 +160,20 @@ class CSimulator:
                                  angle_index=a.value, vx=vx.value, vy=vy.value))
         return result
 
+    def beam_search(self):
+        """Run C beam search on current CSimulator state. Returns bitmask (0-12)."""
+        return _lib.sim_beam_search(self._ptr)
+
+    def beam_search_raw(self, px, py, bullets):
+        """Run C beam search from bullet arrays (no simulator sync).
+        bullets: list of (x, y, angle_index) tuples.
+        Returns bitmask (0-12)."""
+        n = len(bullets)
+        bx = (ctypes.c_int * n)(*[b[0] for b in bullets])
+        by = (ctypes.c_int * n)(*[b[1] for b in bullets])
+        ai = (ctypes.c_int * n)(*[b[2] for b in bullets])
+        return _lib.sim_beam_search_raw(px, py, n, bx, by, ai)
+
     def step_with_grid(self, input_bits, grid_out):
         """
         One sim step + compute grid state in C (eliminates Python encode_state).
@@ -205,3 +228,13 @@ def run_episode_c(c_sim, max_frames=8000, epsilon=0.0):
     Returns frames survived.
     """
     return _lib.sim_run_episode_c(c_sim._ptr, max_frames, ctypes.c_float(epsilon))
+
+
+# ── Standalone C beam search (no CSimulator instance needed) ─
+def c_beam_search(px, py, bullets):
+    """Run C beam search from bullet data. bullets: list of (x,y,angle_index)."""
+    n = len(bullets)
+    bx = (ctypes.c_int * n)(*[b[0] for b in bullets])
+    by = (ctypes.c_int * n)(*[b[1] for b in bullets])
+    ai = (ctypes.c_int * n)(*[b[2] for b in bullets])
+    return _lib.sim_beam_search_raw(px, py, n, bx, by, ai)
