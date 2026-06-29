@@ -13,6 +13,7 @@ import time
 import sys
 import json
 import os
+import threading
 from datetime import datetime
 from loguru import logger
 
@@ -71,6 +72,31 @@ def run(ai_name="ai_direct", max_runs=10):
     last_log = 0.0
     last_screen = -1
 
+    # ── Bits→movement lookup + prediction tracker ──
+    _BITS_MAP = {0:(0,0), 1:(-1,0), 8:(1,0), 2:(0,-1), 4:(0,1),
+                 3:(-1,-1), 5:(-1,1), 10:(1,-1), 12:(1,1)}
+    _pred_px = _pred_py = None
+    _lag_count = 0
+    _state = {"px": 152, "py": 44, "active": [], "ready": False}
+    _lock = threading.Lock()
+    _stop = threading.Event()
+
+    def _reader():
+        while not _stop.is_set() and game.process_handle:
+            px, py = game.get_player_pos()
+            active = [b for b in game.get_bullets() if b.angle_index != 0xFF]
+            with _lock:
+                _state["px"] = px; _state["py"] = py
+                _state["active"] = active; _state["ready"] = True
+            _stop.wait(0.005)  # ~200 Hz, game runs at 80 Hz
+
+    _thread = threading.Thread(target=_reader, daemon=True)
+    _thread.start()
+    for _ in range(100):  # wait for first data
+        with _lock:
+            if _state["ready"]: break
+        time.sleep(0.01)
+
     try:
         while True:
             state = game.get_game_state()
@@ -83,11 +109,24 @@ def run(ai_name="ai_direct", max_runs=10):
                 max_bullets = 0
                 run_frames = 0
                 run_count += 1
+                _pred_px = _pred_py = None
                 logger.success(f"=== RUN {run_count} START ===")
 
             # ── Run ended ──
             if in_run and (not is_playing or is_dead):
                 in_run = False
+                
+                # Save pre-death snapshot for analysis
+                try:
+                    with open(f'logs/death_r{run_count}.json', 'w') as f:
+                        json.dump(_last_snapshot, f)
+                    nbullets = len(_last_snapshot['bullets'])
+                    logger.debug(f'Saved death snapshot: {nbullets} bullets')
+                except NameError:
+                    pass
+                except Exception as e:
+                    logger.warning(f'Failed to save death snapshot: {e}')
+                
                 ms = game.get_survival_ms()
                 frames = game.get_game_time()
                 mult = game.get_score_multiplier() or 1
@@ -123,18 +162,60 @@ def run(ai_name="ai_direct", max_runs=10):
                 time.sleep(0.15)
                 continue
 
-            # ── Gameplay ──
+            # ── Gameplay (reads latest state from background thread) ──
             if in_run and is_playing:
-                px, py = game.get_player_pos()
-                bullets = game.get_bullets()
-                active = [b for b in bullets if b.angle_index != 0xFF]
+                with _lock:
+                    px, py = _state["px"], _state["py"]
+                    active = _state["active"]
+
+                # Compare actual position to our prediction from last frame
+                if _pred_px is not None:
+                    pdx = px - _pred_px
+                    pdy = py - _pred_py
+                    if abs(pdx) > 1 or abs(pdy) > 1:
+                        _lag_count += 1
 
                 run_frames += 1
                 if len(active) > max_bullets:
                     max_bullets = len(active)
 
+                # ── Bullet prediction accuracy ──
+                _pred_err = 0.0
+                if active and hasattr(ai, '_last_bullet'):
+                    lb = ai._last_bullet
+                    for b in active:
+                        if b.angle_index == lb['ang'] and b.type == lb['type']:
+                            pred_x = lb['px'] + lb['vx']
+                            pred_y = lb['py'] + lb['vy']
+                            _pred_err = ((b.x-pred_x)**2+(b.y-pred_y)**2)**0.5
+                            break
+                if active:
+                    b0 = active[0]
+                    idx = b0.angle_index & 63
+                    import struct
+                    vdata = game.read_memory(0x00405d74 + idx*12, 8)
+                    rvx, rvy = struct.unpack('<ii', vdata)
+                    ai._last_bullet = {
+                        'ang': b0.angle_index, 'type': b0.type,
+                        'px': b0.x, 'py': b0.y,
+                        'vx': rvx/64.0, 'vy': rvy/64.0
+                    }
+
                 bits = ai.decide(px, py, active)
                 game.write_int(0x00406d7c, bits)
+
+                # ── Save pre-death snapshot ──
+                _last_snapshot = {
+                    'px': px, 'py': py,
+                    'bullets': [(b.raw_x, b.raw_y, b.angle_index, b.type,
+                                 b.timer, b.index, b.vx, b.vy) for b in active],
+                    'bits': bits
+                }
+
+                # Predict where player SHOULD be next frame
+                dx, dy = _BITS_MAP.get(bits, (0, 0))
+                _pred_px = px + dx
+                _pred_py = py + dy
 
                 now = time.time()
                 if now - last_log > 2.0:
@@ -144,16 +225,20 @@ def run(ai_name="ai_direct", max_runs=10):
                     for b in active:
                         types[b.type] = types.get(b.type, 0) + 1
                     tstr = " ".join(f"T{t}={c}" for t, c in sorted(types.items()))
+                    lag_str = f" | LAG:{_lag_count}" if _lag_count > 0 else ""
+                    pred_str = f" | PRED_ERR:{_pred_err:.1f}px" if _pred_err > 1.0 else ""
                     logger.info(
                         f"R{run_count} P:{px:>3},{py:>3} B:{len(active):>3} [{tstr}] "
-                        f"Pat:{pat} Grz:{grz} → {kbd.get_key_name(bits):>8} | {run_frames}tk"
+                        f"Pat:{pat} Grz:{grz} → {kbd.get_key_name(bits):>8} | {run_frames}tk{lag_str}{pred_str}"
                     )
                     last_log = now
+                    _lag_count = 0
 
     except KeyboardInterrupt:
         game.write_int(0x00406d7c, 0)
         logger.info("Stopped by user.")
     finally:
+        _stop.set()
         game.cleanup()
 
     if history:

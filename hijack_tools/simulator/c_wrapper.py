@@ -45,6 +45,32 @@ _lib.sim_get_graze.restype = ctypes.c_int
 _lib.sim_get_frame.argtypes = [ctypes.c_void_p]
 _lib.sim_get_frame.restype = ctypes.c_int
 
+_lib.sim_get_rng.argtypes = [ctypes.c_void_p]
+_lib.sim_get_rng.restype = ctypes.c_uint
+
+# ── State loading (real-game replay) ────────────────────────
+_lib.sim_set_player.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+_lib.sim_set_player.restype = None
+
+_lib.sim_set_rng.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+_lib.sim_set_rng.restype = None
+
+_lib.sim_set_pattern.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+_lib.sim_set_pattern.restype = None
+
+_lib.sim_set_next_spawn.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_lib.sim_set_next_spawn.restype = None
+
+_lib.sim_set_frame.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_lib.sim_set_frame.restype = None
+
+_lib.sim_load_bullets.argtypes = [ctypes.c_void_p, ctypes.c_int,
+    ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
+    ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
+    ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
+    ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
+_lib.sim_load_bullets.restype = None
+
 # ── Combined step + grid state (fast path for RL) ────────────
 _lib.sim_step_with_grid.argtypes = [ctypes.c_void_p, ctypes.c_int,
                                       ctypes.POINTER(ctypes.c_float)]
@@ -163,6 +189,39 @@ class CSimulator:
     def beam_search(self):
         """Run C beam search on current CSimulator state. Returns bitmask (0-12)."""
         return _lib.sim_beam_search(self._ptr)
+
+    def set_player(self, px, py):
+        """Set player position (for state replay)."""
+        _lib.sim_set_player(self._ptr, px, py)
+
+    def set_rng(self, rng):
+        """Set RNG state (for state replay)."""
+        _lib.sim_set_rng(self._ptr, rng)
+
+    def set_pattern(self, pattern, next_pattern):
+        """Set pattern state (for state replay)."""
+        _lib.sim_set_pattern(self._ptr, pattern, next_pattern)
+
+    def set_next_spawn(self, next_spawn):
+        """Set next spawn frame (for state replay)."""
+        _lib.sim_set_next_spawn(self._ptr, next_spawn)
+
+    def set_frame(self, frame):
+        """Set frame counter (for state replay)."""
+        _lib.sim_set_frame(self._ptr, frame)
+
+    def load_bullets(self, bullet_tuples):
+        """Load bullets from list of (raw_x, raw_y, angle, type, timer, counter, vx, vy) tuples."""
+        n = len(bullet_tuples)
+        rx = (ctypes.c_int * n)(*[b[0] for b in bullet_tuples])
+        ry = (ctypes.c_int * n)(*[b[1] for b in bullet_tuples])
+        ai = (ctypes.c_int * n)(*[b[2] for b in bullet_tuples])
+        ty = (ctypes.c_int * n)(*[b[3] for b in bullet_tuples])
+        ti = (ctypes.c_int * n)(*[b[4] for b in bullet_tuples])
+        ct = (ctypes.c_int * n)(*[b[5] for b in bullet_tuples])
+        vx = (ctypes.c_int * n)(*[b[6] for b in bullet_tuples])
+        vy = (ctypes.c_int * n)(*[b[7] for b in bullet_tuples])
+        _lib.sim_load_bullets(self._ptr, n, rx, ry, ai, ty, ti, ct, vx, vy)
 
     def beam_search_raw(self, px, py, bullets):
         """Run C beam search from bullet arrays (no simulator sync).

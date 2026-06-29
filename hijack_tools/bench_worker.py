@@ -1,5 +1,10 @@
 """Worker function for parallel beam search benchmarks."""
-import sys; sys.path.insert(0, 'hijack_tools')
+import sys, os
+# Ensure hijack_tools is importable from any working directory
+_dir = os.path.dirname(os.path.abspath(__file__))
+_parent = os.path.dirname(_dir)
+if _parent not in sys.path:
+    sys.path.insert(0, _parent)
 from simulator.c_wrapper import CSimulator
 
 

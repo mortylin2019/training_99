@@ -22,8 +22,10 @@
 /* ── Constants (from config.py) ─────────────────────────── */
 #define SCR_W           304
 #define SCR_H           224
-#define RAW_MAX_X       0x5101
-#define RAW_MAX_Y       0x3D01
+#define RAW_MAX_X       0x5101   /* off-screen threshold    */
+#define RAW_MAX_Y       0x3D01   /* off-screen threshold    */
+#define RAW_SPAWN_X     0x5100   /* spawn edge modulo       */
+#define RAW_SPAWN_Y     0x3D00   /* spawn edge position     */
 #define MAX_ENTITIES    300
 #define MAX_BULLETS     299
 #define NUM_ANGLES      64
@@ -233,10 +235,10 @@ static void spawn_at(GameState *s, int slot) {
     Bullet *b = &s->bullets[slot];
     int edge = rng_next(&s->rng_state) & (SPAWN_EDGES - 1);
 
-    if (edge == 0)      { b->raw_x = rng_next(&s->rng_state) % RAW_MAX_X; b->raw_y = 0; }
-    else if (edge == 1) { b->raw_x = rng_next(&s->rng_state) % RAW_MAX_X; b->raw_y = RAW_MAX_Y; }
-    else if (edge == 2) { b->raw_x = 0; b->raw_y = rng_next(&s->rng_state) % RAW_MAX_Y; }
-    else                { b->raw_x = RAW_MAX_X; b->raw_y = rng_next(&s->rng_state) % RAW_MAX_Y; }
+    if (edge == 0)      { b->raw_x = rng_next(&s->rng_state) % RAW_SPAWN_X; b->raw_y = 0; }
+    else if (edge == 1) { b->raw_x = rng_next(&s->rng_state) % RAW_SPAWN_X; b->raw_y = RAW_SPAWN_Y; }
+    else if (edge == 2) { b->raw_x = 0; b->raw_y = rng_next(&s->rng_state) % RAW_SPAWN_Y; }
+    else                { b->raw_x = RAW_SPAWN_X; b->raw_y = rng_next(&s->rng_state) % RAW_SPAWN_Y; }
 
     int pat = s->pattern;
     if (pat < 0 || pat > 7) pat = 0;
@@ -354,17 +356,7 @@ EXPORT int sim_step(GameState* s, int input_bits) {
     if (s->dead) return 0;
     s->frame++;
 
-    /* Player movement */
-    int dx = (input_bits & 8 ? 1 : 0) - (input_bits & 1 ? 1 : 0);
-    int dy = (input_bits & 4 ? 1 : 0) - (input_bits & 2 ? 1 : 0);
-    s->px += dx;
-    s->py += dy;
-    if (s->px < 0) s->px = 0;
-    if (s->px > SCR_W) s->px = SCR_W;
-    if (s->py < 0) s->py = 0;
-    if (s->py > SCR_H) s->py = SCR_H;
-
-    /* Entity loop */
+    /* ── Entity loop (real game order: entities FIRST, then player) ── */
     for (int i = 0; i < MAX_ENTITIES; i++) {
         Bullet *b = &s->bullets[i];
 
@@ -400,8 +392,11 @@ EXPORT int sim_step(GameState* s, int input_bits) {
         /* Move */
         move_bullet(b, s->px, s->py, &s->rng_state);
 
-        /* Off-screen */
-        if (b->raw_x >= RAW_MAX_X || b->raw_y >= RAW_MAX_Y) {
+        /* Off-screen — use unsigned comparison to match real game (ja instruction).
+           Bullets going off left/top edges produce negative signed values,
+           which are large unsigned values > RAW_MAX, correctly caught. */
+        if ((unsigned int)b->raw_x >= RAW_MAX_X ||
+            (unsigned int)b->raw_y >= RAW_MAX_Y) {
             if (b->type == TYPE_H_ACCEL) s->bounce_limit--;
             spawn_at(s, i);
             continue;
@@ -435,6 +430,16 @@ EXPORT int sim_step(GameState* s, int input_bits) {
             }
         }
     }
+
+    /* ── Player movement (AFTER entity loop, matching real game order) ── */
+    int dx = (input_bits & 8 ? 1 : 0) - (input_bits & 1 ? 1 : 0);
+    int dy = (input_bits & 4 ? 1 : 0) - (input_bits & 2 ? 1 : 0);
+    s->px += dx;
+    s->py += dy;
+    if (s->px < 0) s->px = 0;
+    if (s->px > SCR_W) s->px = SCR_W;
+    if (s->py < 0) s->py = 0;
+    if (s->py > SCR_H) s->py = SCR_H;
 
     return !s->dead;
 }
@@ -471,6 +476,53 @@ EXPORT int sim_get_graze(GameState* s) { return s->active_near; }
 EXPORT int sim_get_frame(GameState* s) { return s->frame; }
 EXPORT int sim_get_bullet_size(void) { return sizeof(Bullet); }
 EXPORT unsigned int sim_get_rng(GameState* s) { return s->rng_state; }
+
+/* ── State loading (for real-game replay) ───────────────── */
+EXPORT void sim_set_player(GameState* s, int px, int py) {
+    s->px = px;  s->py = py;
+}
+
+EXPORT void sim_set_rng(GameState* s, unsigned int rng) {
+    s->rng_state = rng;
+}
+
+EXPORT void sim_set_pattern(GameState* s, int pattern, int next_pattern) {
+    s->pattern = pattern;
+    s->next_pattern = next_pattern;
+}
+
+EXPORT void sim_set_next_spawn(GameState* s, int next_spawn) {
+    s->next_spawn = next_spawn;
+}
+
+EXPORT void sim_set_frame(GameState* s, int frame) {
+    s->frame = frame;
+}
+
+EXPORT void sim_load_bullets(GameState* s, int n,
+                              int* raw_x, int* raw_y,
+                              int* angle, int* type,
+                              int* timer, int* counter,
+                              int* vx, int* vy) {
+    /* Clear all bullets first */
+    for (int i = 0; i < MAX_ENTITIES; i++) {
+        s->bullets[i].angle_index = INACTIVE;
+    }
+    s->bullet_count = n;
+    if (n > MAX_BULLETS) n = MAX_BULLETS;
+    for (int i = 0; i < n; i++) {
+        Bullet *b = &s->bullets[i];
+        b->raw_x = raw_x[i];
+        b->raw_y = raw_y[i];
+        b->angle_index = (unsigned char)(angle[i] & 0xFF);
+        b->type = (unsigned char)(type[i] & 0xFF);
+        b->timer = (unsigned char)(timer[i] & 0xFF);
+        b->counter = (unsigned char)(counter[i] & 0xFF);
+        b->vx = (char)(vx[i] & 0xFF);
+        b->vy = (char)(vy[i] & 0xFF);
+        b->grazed = 0;
+    }
+}
 
 /* ═══════════════════════════════════════════════════════════
  * C INFERENCE ENGINE — runs trained PyTorch model in pure C
@@ -742,6 +794,9 @@ EXPORT int sim_run_episode(GameState* s, int max_frames,
 
 /* Strong center pull (matching algo_config.py CENTER_PULL=5.0) */
 #define BS_CENTER_PULL    0.3
+/* Danger: 1/r² with 2px clamp */
+#define BS_DANGER_BASE    2000.0
+#define BS_DANGER_POWER   2    /* 1=1/r, 2=1/r² */
 
 static const int bs_moves[9][2] = {
     {0,0}, {-1,0}, {1,0}, {0,-1}, {0,1},
@@ -824,7 +879,7 @@ EXPORT int sim_beam_search(GameState* s) {
 #if USE_INVERSE_SQUARE
                     double d2 = dx * dx + dy * dy;
                     if (d2 < 4.0) d2 = 4.0;
-                    danger += 2000.0 / d2;
+                    danger += BS_DANGER_BASE / d2;
 #endif
                 }
 
@@ -960,7 +1015,7 @@ EXPORT int sim_beam_search_raw(int px, int py,
 #if USE_INVERSE_SQUARE
                     double d2 = dx * dx + dy * dy;
                     if (d2 < 4.0) d2 = 4.0;
-                    danger += 2000.0 / d2;
+                    danger += BS_DANGER_BASE / d2;
 #endif
                 }
 #if USE_CENTER_PULL
