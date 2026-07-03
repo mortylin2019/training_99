@@ -1,3 +1,16 @@
+/*
+ * WARNING: This is raw Ghidra 12.0.3 decompilation output. KNOWN INACCURACIES:
+ *
+ * 1. Variable names are auto-generated (iVar2, uVar4, etc.) — no semantic meaning
+ * 2. Function signatures are mangled (CONCAT31/CONCAT44 artifacts)
+ * 3. `undefined4`/`undefined8` types are Ghidra estimating register sizes
+ * 4. The control flow logic is CORRECT but the control flow representation is ugly
+ * 5. Some comparisons use `< 1` instead of `<= 0` (equivalent but obscures intent)
+ *
+ * DO NOT code from this directly. The assembly (.asm/ANNOTATED.md) is authoritative.
+ * The Python simulator (hijack_tools/simulator/) has been ESIL-verified (1105/1105)
+ * and cross-checked against radare2 disassembly. Trust the simulator over this file.
+ */
 typedef unsigned char   undefined;
 
 typedef unsigned char    byte;
