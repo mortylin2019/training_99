@@ -59,7 +59,7 @@ try:
                 'frame': frame,
                 'px': px, 'py': py,
                 'bullets': [(b.raw_x, b.raw_y, b.angle_index, b.type,
-                             b.timer, b.index, b.vx, b.vy) for b in active],
+                             b.timer, b.counter, b.vx, b.vy) for b in active],
                 'rng': g.read_int(0x00405c00),
                 'pattern': g.read_int(0x00406dbc),
                 'next_pattern': int(next_pat_offset),  # frames from now

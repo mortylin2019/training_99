@@ -178,8 +178,8 @@ static int compute_aimed_angle(int bx, int by, int px, int py,
     } else {
         if (dx == 0)          { octant = 0x10; divisor = 0; }
         else if (dy == 0)     { octant = 0;    divisor = 0; }
-        else if (dy < dx)     { octant = 0;    divisor = dy; }
-        else                  { octant = 8;    divisor = dy; }
+        else if (dx < dy)     { octant = 8;    divisor = dy; }
+        else                  { octant = 0;    divisor = dy; }
     }
 
     int angle;
@@ -362,12 +362,12 @@ EXPORT int sim_step(GameState* s, int input_bits) {
 
         /* Spawn boundary */
         if (i >= s->bullet_count) {
-            if (s->bullet_count < MAX_BULLETS && s->frame >= s->next_spawn && s->pattern != 7) {
+            if (s->bullet_count < MAX_BULLETS && s->frame > s->next_spawn && s->pattern != 7) {
                 spawn_at(s, i);
                 s->bullet_count++;
                 s->next_spawn = s->frame + s->spawn_interval;
             }
-            if (s->frame >= s->next_pattern) {
+            if (s->frame > s->next_pattern) {
                 if (s->pattern == 0) {
                     if (rng_next(&s->rng_state) < PATTERN_CHANCE) {
                         s->pattern = (rng_next(&s->rng_state) % 7) + 1;
@@ -386,7 +386,7 @@ EXPORT int sim_step(GameState* s, int input_bits) {
         /* Inactive slot → respawn one */
         if (b->angle_index == INACTIVE) {
             spawn_at(s, i);
-            return !s->dead;
+            goto apply_input;
         }
 
         /* Move */
@@ -397,7 +397,7 @@ EXPORT int sim_step(GameState* s, int input_bits) {
            which are large unsigned values > RAW_MAX, correctly caught. */
         if ((unsigned int)b->raw_x >= RAW_MAX_X ||
             (unsigned int)b->raw_y >= RAW_MAX_Y) {
-            if (b->type == TYPE_H_ACCEL) s->bounce_limit--;
+            if (b->type & 2) s->bounce_limit--;  /* type 2 (H-Accel) or type 3 (Accel) — matches asm: test [ecx+0xa],2 */
             spawn_at(s, i);
             continue;
         }
@@ -431,15 +431,15 @@ EXPORT int sim_step(GameState* s, int input_bits) {
         }
     }
 
-    /* ── Player movement (AFTER entity loop, matching real game order) ── */
-    int dx = (input_bits & 8 ? 1 : 0) - (input_bits & 1 ? 1 : 0);
-    int dy = (input_bits & 4 ? 1 : 0) - (input_bits & 2 ? 1 : 0);
-    s->px += dx;
-    s->py += dy;
-    if (s->px < 0) s->px = 0;
-    if (s->px > SCR_W) s->px = SCR_W;
-    if (s->py < 0) s->py = 0;
-    if (s->py > SCR_H) s->py = SCR_H;
+    /* ── Player movement (AFTER entity loop, matching real game Order) ── */
+apply_input:
+    { int dx = (input_bits & 8 ? 1 : 0) - (input_bits & 1 ? 1 : 0);
+      int dy = (input_bits & 4 ? 1 : 0) - (input_bits & 2 ? 1 : 0);
+      s->px += dx; s->py += dy;
+      if (s->px < 0) s->px = 0;
+      if (s->px > SCR_W) s->px = SCR_W;
+      if (s->py < 0) s->py = 0;
+      if (s->py > SCR_H) s->py = SCR_H; }
 
     return !s->dead;
 }

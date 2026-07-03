@@ -5,10 +5,10 @@ class Bullet:
     raw_x: int
     raw_y: int
     angle_index: int  # Offset 0x08 - Direction for Type 0/1/3
-    active: int       # Offset 0x09
+    grazed: int       # Offset 0x09 - Graze flag (1 = currently being grazed)
     type: int         # Offset 0x0A (0: Normal, 1: Homing, 2: Bounce, 3: Accel)
     timer: int        # Offset 0x0B
-    index: int        # Offset 0x0C
+    counter: int      # Offset 0x0C - Homing recalculation counter
     vx: int           # Offset 0x0D - Direct speed for Type 2
     vy: int           # Offset 0x0E - Direct speed for Type 2
     dist_to_player: float = 0.0 # Distance to player in pixels

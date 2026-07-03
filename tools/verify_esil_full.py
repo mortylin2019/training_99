@@ -80,6 +80,8 @@ EL_TYPE3_ENTRY = 0x004031DA
 EL_TYPE3_DONE = 0x004031F6   # jmp 0x40328a
 EL_TYPE0_ENTRY = 0x0040326E
 EL_TYPE0_DONE = 0x0040328A
+EL_TYPE1_ENTRY = 0x004031FB  # after type dispatch: je 0x4031fb
+EL_TYPE1_DONE  = 0x0040328A  # jmp 0x40328a (common post-movement)
 
 ESIL_STACK = 0x007FFE000  # scratch stack for ESIL
 
@@ -340,6 +342,29 @@ class SimulatorRef:
         vx, vy = self.accel[angle & (NUM_ANGLES - 1)]
         return raw_x + vx, raw_y + vy
 
+    def move_type1(self, raw_x, raw_y, angle, counter, timer, px, py, rng_state):
+        """Type 1 homing: counter++, re-aim on timer, steer ±1 or lose-lock."""
+        counter += 1
+        if counter >= timer:
+            rng_state, rv = self.rng(rng_state)
+            counter = rv & 7  # phase jitter
+            rng_state, target = self.aimed_angle(raw_x, raw_y, px, py, rng_state, 3)  # spread=3
+            cur = angle
+            if target != cur:
+                if target < cur:
+                    cur = (cur - 64) & 0xFF
+                diff = (target - cur) & 0xFF
+                if diff < 0x19:       # STEER_NEAR
+                    angle = (angle + 1) & 63
+                elif diff < 0x28:     # STEER_LOSE → lose lock
+                    vx, vy = self.vel[angle & 63]
+                    return raw_x + vx, raw_y + vy, angle, counter, rng_state, 0  # type→0
+                else:
+                    angle = (angle - 1) & 63
+
+        vx, vy = self.vel[angle & 63]
+        return raw_x + vx, raw_y + vy, angle, counter, rng_state, 1  # still homing
+
     # ── Collision / Graze ──
     def check_collision(self, raw_x, raw_y, px, py):
         bx = (raw_x >> RAW_SHIFT) - PIXEL_OFFSET
@@ -577,6 +602,54 @@ def test_movement(h: ESILHarness, ref: SimulatorRef):
         else:
             mismatches.append(f"  T2 {desc}: py=({ref_nx},{ref_ny}) esil=({esil_nx},{esil_ny})")
         total += 1
+
+    # ── Type 1 (Homing) ──
+    px, py = PLAYER_START_X, PLAYER_START_Y
+    # Test: counter < timer → no re-aim, just move
+    raw_x, raw_y = 0x1000, 0x800
+    angle, counter, timer = 0, 10, 48  # counter far from timer
+    rng_seed = 0x12345678
+
+    ref_nx, ref_ny, ref_ang, ref_cnt, ref_rng, ref_type = ref.move_type1(
+        raw_x, raw_y, angle, counter, timer, px, py, rng_seed)
+
+    h.w32(ADDR_RNG_STATE, rng_seed)
+    h.w32(ADDR_PLAYER_X, px)
+    h.w32(ADDR_PLAYER_Y, py)
+    h.write_entity(ADDR_ENTITY_ARRAY, raw_x, raw_y, angle, 0, TYPE_HOMING, timer, counter)
+    h.w32(ESIL_STACK, ADDR_ENTITY_ARRAY)
+    h.emulate_to(EL_TYPE1_ENTRY, EL_TYPE1_DONE, esi=angle)  # esi=angle for jne→0x40326e fallthrough
+    esil_nx = h.r32(ADDR_ENTITY_ARRAY)
+    esil_ny = h.r32(ADDR_ENTITY_ARRAY + 4)
+    esil_ang = h.read_entity_angle(ADDR_ENTITY_ARRAY)
+    esil_cnt = h.r8(ADDR_ENTITY_ARRAY + 0x0C)
+
+    ok = (ref_nx == esil_nx and ref_ny == esil_ny and ref_ang == esil_ang)
+    if ok: passed += 1
+    else: mismatches.append(f"  T1 no-reaim: py=({ref_nx},{ref_ny},{ref_ang}) esil=({esil_nx},{esil_ny},{esil_ang})")
+    total += 1
+
+    # Test: counter >= timer → re-aim triggers with phase jitter
+    raw_x, raw_y = 0x2000, 0x1000
+    angle, counter, timer = 16, 47, 48  # counter at trigger threshold
+    rng_seed = 0xDEADBEEF
+
+    ref_nx, ref_ny, ref_ang, ref_cnt, ref_rng, ref_type = ref.move_type1(
+        raw_x, raw_y, angle, counter, timer, px, py, rng_seed)
+
+    h.w32(ADDR_RNG_STATE, rng_seed)
+    h.write_entity(ADDR_ENTITY_ARRAY, raw_x, raw_y, angle, 0, TYPE_HOMING, timer, counter)
+    h.w32(ESIL_STACK, ADDR_ENTITY_ARRAY)
+    h.emulate_to(EL_TYPE1_ENTRY, EL_TYPE1_DONE)
+    esil_nx = h.r32(ADDR_ENTITY_ARRAY)
+    esil_ny = h.r32(ADDR_ENTITY_ARRAY + 4)
+    esil_ang = h.read_entity_angle(ADDR_ENTITY_ARRAY)
+    esil_type = h.read_entity_type(ADDR_ENTITY_ARRAY)
+
+    ok = (ref_nx == esil_nx and ref_ny == esil_ny and ref_ang == esil_ang)
+    if ok: passed += 1
+    else: mismatches.append(f"  T1 reaim: py=({ref_nx},{ref_ny},{ref_ang}) esil=({esil_nx},{esil_ny},{esil_ang})")
+    total += 1
 
     for m in mismatches[:15]:
         print(m)

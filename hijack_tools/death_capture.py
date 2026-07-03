@@ -48,7 +48,7 @@ try:
             'frame': frame,
             'px': px, 'py': py,
             'bullets': [(b.raw_x, b.raw_y, b.angle_index, b.type,
-                         b.timer, b.index, b.vx, b.vy) for b in active]
+                         b.timer, b.counter, b.vx, b.vy) for b in active]
         }
 
         bits = ai.decide(px, py, active)

@@ -44,6 +44,9 @@ class GameSimulator:
         # 300 slots, all inactive (C: do { slot[2]=0xff; } while(i<300))
         self.bullets = [Bullet(angle_index=INACTIVE) for _ in range(MAX_ENTITIES)]
 
+        # No pre-fill: GameInit only marks slots inactive (angle_index=0xFF).
+        # Bullets spawn one-per-frame via EntityLoop spawn boundary (step()).
+
     # ── FUN_00402d68: Compute aimed angle ─────────────────
     def _aimed_angle(self, bullet_raw_x, bullet_raw_y, spread):
         """FUN_00402d68 — EXACT assembly-verified octant search."""
@@ -87,14 +90,16 @@ class GameSimulator:
         if self.pattern == 5:
             b.timer = ((self.rng.next() & 3) + 1) * 16
 
-        # Pattern 7: H-Accel, no aiming, vx=vy=0
+        # Pattern 7: H-Accel, no aiming (vx=vy=0, returns early)
+        # When bounce_limit >= MAX_BOUNCE: fall through to Type 0 with aiming
         if self.pattern == 7:
             if self.bounce_limit >= MAX_BOUNCE:
                 b.type = TYPE_NORMAL
+                # FALL THROUGH to aimed spawn below
             else:
                 self.bounce_limit += 1
-            b.angle_index = 0
-            return
+                b.angle_index = 0
+                return
 
         # AIMED spawn (FUN_00402d68)
         spread = info.get("spread", 5)
@@ -112,13 +117,11 @@ class GameSimulator:
 
         self.frame += 1
 
-        # Player movement (FUN_00403400)
-        dx = (1 if input_bits & 8 else 0) - (1 if input_bits & 1 else 0)
-        dy = (1 if input_bits & 4 else 0) - (1 if input_bits & 2 else 0)
-        self.px = max(0, min(SCR_W, self.px + dx))
-        self.py = max(0, min(SCR_H, self.py + dy))
-
         # Entity loop (FUN_00402fbc: do { ... } while(true))
+        # Player movement happens AFTER entity loop (matching real game order:
+        # MainFrame calls FUN_00402fbc first, then applies input second).
+        # This means newly spawned bullets aim at the player's OLD position,
+        # making dodging slightly harder (and matching the real game).
         active = []
         i = 0
         while i < MAX_ENTITIES:
@@ -128,17 +131,18 @@ class GameSimulator:
             if i >= self.bullet_count:
                 # Spawn check (C: timer expired && count < 299 && pattern != 7)
                 if (self.bullet_count < MAX_BULLETS
-                        and self.frame >= self.next_spawn
+                        and self.frame > self.next_spawn
                         and self.pattern != 7):
                     self._spawn_at(i)
                     self.bullet_count += 1
                     self.next_spawn = self.frame + self._spawn_interval
 
                 # Pattern check at boundary (C: even if spawn didn't happen)
-                if self.frame >= self.next_pattern:
+                if self.frame > self.next_pattern:
                     if self.pattern == 0:
-                        if self.rng.next() < PATTERN_CHANCE:
-                            self.pattern = (self.rng.next() % 7) + 1
+                        r = self.rng.next()
+                        if r < PATTERN_CHANCE:
+                            self.pattern = (r % 7) + 1  # r2: mov eax,[esp+8] reuses same RNG value
                             self.next_pattern = self.frame + PATTERN_ACTIVE
                         else:
                             self.next_pattern = self.frame + PATTERN_CHECK
@@ -150,18 +154,20 @@ class GameSimulator:
             # Inactive slot → respawn exactly ONE (C: if (uVar6==0xff) {spawn; return;})
             if b.angle_index == INACTIVE:
                 self._spawn_at(i)
+                self._apply_input(input_bits)
                 return not self.dead, active
 
-            # Move bullet (C: type-specific movement)
-            move_bullet(b, self.px, self.py, self.rng)
-
-            # Off-screen check (C: raw_x < 0x5101 && raw_y < 0x3d01)
-            if b.raw_x >= RAW_MAX_X or b.raw_y >= RAW_MAX_Y:
-                if b.type == TYPE_H_ACCEL:
-                    self.bounce_limit -= 1  # C: no underflow guard
+            # Off-screen check BEFORE move (asm at 0x40300E: cmp raw_x,0x5100; ja)
+            # Mask to 32-bit unsigned for negative raw_x/raw_y (bullets off left/top edges)
+            if (b.raw_x & 0xFFFFFFFF) >= RAW_MAX_X or (b.raw_y & 0xFFFFFFFF) >= RAW_MAX_Y:
+                if b.type & 2:  # type 2 (H-Accel) or 3 (Accel) — asm: test [ecx+0xa],2
+                    self.bounce_limit -= 1
                 self._spawn_at(i)
                 i += 1
                 continue
+
+            # Move bullet (C: type-specific movement)
+            move_bullet(b, self.px, self.py, self.rng)
 
             # Graze + collision (C: only when G_GameOverFlag == 0)
             if not self.dead:
@@ -197,7 +203,15 @@ class GameSimulator:
                 active.append(b)
             i += 1
 
+        self._apply_input(input_bits)
         return not self.dead, active
+
+    def _apply_input(self, input_bits):
+        """Apply player movement from input bitmask (FUN_00403400)."""
+        dx = (1 if input_bits & 8 else 0) - (1 if input_bits & 1 else 0)
+        dy = (1 if input_bits & 4 else 0) - (1 if input_bits & 2 else 0)
+        self.px = max(0, min(SCR_W, self.px + dx))
+        self.py = max(0, min(SCR_H, self.py + dy))
 
     def get_visible_bullets(self):
         """Return active bullets for AI decision."""

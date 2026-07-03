@@ -42,7 +42,7 @@ def move_bullet(b: Bullet, player_x: int, player_y: int, rng):
 
     if b.type == TYPE_HOMING:
         # Type 1: Homing — delegate to @njit function
-        new_raw_x, new_raw_y, new_angle, new_counter, new_rng_state = \
+        new_raw_x, new_raw_y, new_angle, new_counter, new_rng_state, new_type = \
             move_type1_homing(
                 b.raw_x, b.raw_y, b.angle_index, b.counter, b.timer,
                 VEL_TABLE_FLAT, rng.state,
@@ -52,6 +52,7 @@ def move_bullet(b: Bullet, player_x: int, player_y: int, rng):
         b.raw_y = new_raw_y
         b.angle_index = new_angle
         b.counter = new_counter
+        b.type = new_type
         rng.state = new_rng_state
 
     elif b.type == TYPE_H_ACCEL:

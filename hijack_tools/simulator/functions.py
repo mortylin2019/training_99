@@ -59,17 +59,15 @@ def compute_aimed_angle(bullet_raw_x, bullet_raw_y, player_px, player_py,
     else:
         if dx == 0:    octant = 0x10
         elif dy == 0:  octant = 0
-        elif dy < dx:  octant = 0
-        else:          octant = 8
+        elif dx < dy:  octant = 8   # asm: cmp esi,ecx; jle → dy<=dx→0, else→8
+        else:          octant = 0
 
     # Binary: if dy == 0 → skip search (angle = octant); else divisor = dy
     if dy == 0:
         angle = octant & 0xFF
     else:
         # idiv: (dx*0x400) / dy → abs result
-        quotient = (dx * 0x400) // dy
-        if quotient < 0:
-            quotient = -quotient
+        quotient = abs(dx * 0x400) // abs(dy)  # abs avoids sign mismatch: idiv truncates, // floors
 
         # Search loop (esi=counter, ebx=angle, edx=table_ptr)
         best_diff = 0x10000

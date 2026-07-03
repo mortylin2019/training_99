@@ -69,9 +69,7 @@ ENTITY_SIZE          = 15
 # --- Bullet Pattern / Spawning ---
 ADDR_NEXT_PATTERN    = 0x00406dbc  # G_NextBulletPattern — current pattern (0=none, 1-7=active pattern)
 ADDR_PATTERN_DURATION= 0x00406db0  # G_PatternDuration — remaining frames for current pattern
-ADDR_PATTERN_COUNTER = 0x00406dc0  # G_SomePatternCounter — graze-based pattern counter
 ADDR_GRAZE_PAT_CTR   = 0x00406df0  # G_PatternCounter — graze chain counter (1-10)
-ADDR_PATTERN_TIMER2  = 0x00406e00  # G_PatternTimer2 — timer for graze chain reset
 ADDR_NEXT_SPAWN_TIME = 0x00406dfc  # G_NextSpawnTime — timestamp for next bullet spawn
 ADDR_NEXT_PATTERN_TIME=0x00406e00  # G_NextPatternTime — timestamp for pattern change
 

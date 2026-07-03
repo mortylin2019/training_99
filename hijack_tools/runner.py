@@ -208,7 +208,7 @@ def run(ai_name="ai_direct", max_runs=10):
                 _last_snapshot = {
                     'px': px, 'py': py,
                     'bullets': [(b.raw_x, b.raw_y, b.angle_index, b.type,
-                                 b.timer, b.index, b.vx, b.vy) for b in active],
+                                 b.timer, b.counter, b.vx, b.vy) for b in active],
                     'bits': bits
                 }
 

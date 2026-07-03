@@ -153,7 +153,7 @@ def move_type1_homing(raw_x, raw_y, angle_idx, counter, timer,
                 if dy < dx:
                     octant, divisor = 0x20, dy
                 else:
-                    octant, divisor = 0x28, 0
+                    octant, divisor = 0x28, dy
             else:
                 if dx < -dy:
                     octant, divisor = 0x18, dy
@@ -161,39 +161,42 @@ def move_type1_homing(raw_x, raw_y, angle_idx, counter, timer,
                     octant, divisor = 0x10, dy
         elif dy < 0:
             if dx < -dy:
-                octant, divisor = 0x30, dx
+                octant, divisor = 0x30, dy
             else:
-                octant, divisor = 0x38, 0
+                octant, divisor = 0x38, dy
         else:
             if dx == 0:
                 octant, divisor = 0x10, 0
             elif dy == 0:
                 octant, divisor = 0, 0
-            elif dy < dx:
-                octant, divisor = 0x8, dx
+            elif dx < dy:
+                octant, divisor = 8, dy
             else:
-                octant, divisor = 0, 0
+                octant, divisor = 0, dy
 
-        # Octant search (C: do { ... } while(iVar2 < 7))
+        # Octant search — EXACT assembly match (FUN_00402d68):
+        # quotient = abs(dx * 0x400 / divisor)
+        # minimize abs(quotient - tan_ratio) across 7 candidates
         target = octant
-        if divisor != 0 and octant < 0x10:
-            best_val = 0x7FFFFFFF
+        if divisor != 0:
+            quotient = abs(dx * 0x400) // abs(divisor)
+            best_diff = 0x10000
+            entry_idx = octant & 0xFF
+            target = octant & 0xFF
             for s in range(7):
-                idx3 = (octant + s) * 3
-                tan = vel_table_full[idx3 + 2]
-                val = divisor * tan
-                if val < best_val:
-                    best_val = val
-                    target = octant + s + 1  # inc ebx after improvement
-        elif divisor != 0 and octant >= 0x10 and octant <= 0x30:
-            best_val = 0x7FFFFFFF
-            for s in range(7):
-                idx3 = (octant + s) * 3
-                tan = vel_table_full[idx3 + 2]
-                val = divisor * tan
-                if val <= best_val:
-                    best_val = val
-                    target = octant + s + 1
+                idx3 = ((entry_idx + s) % NUM_ANGLES) * 3
+                vy = vel_table_full[idx3 + 1]
+                tan_ratio = vel_table_full[idx3 + 2]
+                if vy == 0:
+                    diff = 0xFFFF
+                elif quotient <= tan_ratio:
+                    diff = tan_ratio - quotient
+                else:
+                    diff = quotient - tan_ratio
+                if diff >= best_diff:
+                    break
+                best_diff = diff
+                target = (octant + s + 1) & 0xFF
 
         # Spread: (angle + RNG%spread + 1 - spread/2) & 0x3F
         rng_state, rv = rng_next(rng_state)
@@ -211,13 +214,13 @@ def move_type1_homing(raw_x, raw_y, angle_idx, counter, timer,
             elif diff < STEER_LOSE:
                 # Lose lock: revert to Type 0 behavior
                 vx, vy = lookup_vel(angle_idx, vel_table)
-                return raw_x + vx, raw_y + vy, angle_idx, counter, rng_state
+                return raw_x + vx, raw_y + vy, angle_idx, counter, rng_state, 0
             else:
                 angle_idx = (angle_idx - 1) & (NUM_ANGLES - 1)
 
     # Movement
     vx, vy = lookup_vel(angle_idx, vel_table)
-    return raw_x + vx, raw_y + vy, angle_idx, counter, rng_state
+    return raw_x + vx, raw_y + vy, angle_idx, counter, rng_state, 1
 
 
 # ── Danger scoring (for AI use) ──────────────────────────────
