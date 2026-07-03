@@ -72,10 +72,10 @@ def test_aimed_angle_cardinal():
                                     player[0], player[1], 0, spread=0)
     assert angle == 15, f"Top→Down: assembly gives 15, got {angle}"
 
-    # Bullet below player → assembly octant=0x30, divisor=dx, search gives 55
+    # Bullet below player → ESIL-verified: angle=49 (divisor=dy always per idiv esi)
     _, angle = compute_aimed_angle(152 * 64, 200 * 64,
                                     player[0], player[1], 0, spread=0)
-    assert angle == 55, f"Bottom→Up: assembly gives 55, got {angle}"
+    assert angle == 49, f"Bottom→Up: ESIL-verified gives 49, got {angle}"
 
     print("  Aimed angle cardinals: OK")
 

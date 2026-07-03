@@ -44,53 +44,30 @@ def compute_aimed_angle(bullet_raw_x, bullet_raw_y, player_px, player_py,
 
     # dx = (player_x+6) - (bullet_raw_x>>6)
     # dy = (player_y+6) - (bullet_raw_y>>6)
-    dx = (player_px + PLAYER_CENTER) - (bullet_raw_x >> RAW_SHIFT)
-    dy = (player_py + PLAYER_CENTER) - (bullet_raw_y >> RAW_SHIFT)
+    dx = (player_px + PLAYER_CENTER) - ((bullet_raw_x & 0xFFFFFFFF) >> RAW_SHIFT)
+    dy = (player_py + PLAYER_CENTER) - ((bullet_raw_y & 0xFFFFFFFF) >> RAW_SHIFT)
 
     # Octant determination (exact assembly branches)
-    # esi=dy, ecx=dx
+    # esi=dy, ecx=dx. Binary always uses idiv esi → divisor is always dy.
     if dx < 0:
         if dy <= 0:
-            if dy < dx:  # esi < ecx (both negative, esi more negative) → octant 0x20
-                octant = 0x20
-                divisor = dy
-            else:         # octant 0x28
-                octant = 0x28
-                divisor = 0  # will skip search (check_zero)
-        else:  # dy > 0
-            if dx < -dy:  # ecx < -esi → octant 0x18
-                octant = 0x18
-                divisor = dy  # dy is the smaller magnitude
-            else:          # octant 0x10
-                octant = 0x10
-                divisor = dy
+            octant = 0x20 if dy < dx else 0x28
+        else:
+            octant = 0x18 if dx < -dy else 0x10
     elif dy < 0:
-        if dx < -dy:      # ecx < -esi → octant 0x30
-            octant = 0x30
-            divisor = dx  # dx is the smaller magnitude
-        else:              # octant 0x38
-            octant = 0x38
-            divisor = 0  # skip search
-    else:  # dx >= 0, dy >= 0
-        if dx == 0:
-            octant = 0x10
-            divisor = 0  # skip
-        elif dy == 0:
-            octant = 0
-            divisor = 0  # skip
-        elif dy < dx:     # esi < ecx → octant 0
-            octant = 0
-            divisor = dy
-        else:              # octant 8
-            octant = 8
-            divisor = dy
+        octant = 0x30 if dx < -dy else 0x38
+    else:
+        if dx == 0:    octant = 0x10
+        elif dy == 0:  octant = 0
+        elif dy < dx:  octant = 0
+        else:          octant = 8
 
-    # Angle starts at octant_base (ebx = bl = octant)
-    if divisor == 0:
-        angle = octant & 0xFF  # check_zero: skip search
+    # Binary: if dy == 0 → skip search (angle = octant); else divisor = dy
+    if dy == 0:
+        angle = octant & 0xFF
     else:
         # idiv: (dx*0x400) / dy → abs result
-        quotient = (dx * 0x400) // divisor
+        quotient = (dx * 0x400) // dy
         if quotient < 0:
             quotient = -quotient
 
@@ -287,8 +264,8 @@ def move_bullet_type3(raw_x, raw_y, angle_index):
 
 
 def is_offscreen(raw_x, raw_y):
-    """C: raw_x >= 0x5101 or raw_y >= 0x3D01."""
-    return raw_x >= RAW_MAX_X or raw_y >= RAW_MAX_Y
+    """C: unsigned comparison — negative raw coords wrapped to 32-bit catch left/top edge exits."""
+    return (raw_x & 0xFFFFFFFF) >= RAW_MAX_X or (raw_y & 0xFFFFFFFF) >= RAW_MAX_Y
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -297,7 +274,7 @@ def is_offscreen(raw_x, raw_y):
 
 def pixel_from_raw(raw):
     """C: (raw >> 6) - 4."""
-    return (raw >> RAW_SHIFT) - PIXEL_OFFSET
+    return ((raw & 0xFFFFFFFF) >> RAW_SHIFT) - PIXEL_OFFSET
 
 
 def check_collision(bullet_raw_x, bullet_raw_y, player_px, player_py):
@@ -340,7 +317,6 @@ def pattern_update(frame, next_pattern_time, pattern, rng_state):
     if pattern == 0:
         rng_state, rv = rng_next(rng_state)
         if rv < PATTERN_CHANCE:
-            rng_state, rv = rng_next(rng_state)
             pattern = (rv % 7) + 1
             next_pattern_time = frame + PATTERN_ACTIVE
         else:
@@ -395,8 +371,8 @@ def process_one_bullet(bullet, player_px, player_py, dead, rng_state,
 
     # Off-screen check
     if is_offscreen(raw_x, raw_y):
-        if btype == TYPE_H_ACCEL:
-            bounce_delta = -1  # caller handles bounce_limit
+        if btype & 2:  # type 2 (H-Accel) or 3 (Accel) — asm: test [ecx+0xa],2
+            bounce_delta = -1
         else:
             bounce_delta = 0
         return {"action": "respawn", "bounce_delta": bounce_delta,

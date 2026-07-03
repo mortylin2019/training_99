@@ -1,0 +1,35 @@
+{
+  "schema_version": 2,
+  "active_work_id": "esil-cross-validation-7c5bbfdc",
+  "works": {
+    "esil-cross-validation-7c5bbfdc": {
+      "work_id": "esil-cross-validation-7c5bbfdc",
+      "active_plan": "/mnt/c/git/training_99/.omo/plans/esil-cross-validation.md",
+      "plan_name": "esil-cross-validation",
+      "status": "active",
+      "started_at": "2026-07-03T13:24:42.659Z",
+      "updated_at": "2026-07-03T13:24:42.659Z",
+      "session_ids": [
+        "opencode:ses_0d7f42af2fferwiYYwT8E5XKCI"
+      ],
+      "session_origins": {
+        "opencode:ses_0d7f42af2fferwiYYwT8E5XKCI": "direct"
+      },
+      "agent": "atlas",
+      "task_sessions": {}
+    }
+  },
+  "active_plan": "/mnt/c/git/training_99/.omo/plans/esil-cross-validation.md",
+  "started_at": "2026-07-03T13:24:42.659Z",
+  "status": "active",
+  "updated_at": "2026-07-03T13:24:42.659Z",
+  "session_ids": [
+    "opencode:ses_0d7f42af2fferwiYYwT8E5XKCI"
+  ],
+  "session_origins": {
+    "opencode:ses_0d7f42af2fferwiYYwT8E5XKCI": "direct"
+  },
+  "plan_name": "esil-cross-validation",
+  "task_sessions": {},
+  "agent": "atlas"
+}
