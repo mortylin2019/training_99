@@ -12,7 +12,9 @@ Reverse-engineered Japanese bullet-hell survival game. Python AIs attach to the 
 
 ## Why
 
-Back then, I wrote programs to play games automatically to learn both programming and machine learning. 特訓９９ is one of the games I played when I was young. It would be fun if I could write a program to play it, but back then it was too difficult for me. Now with all the new AI tools, I can reverse-engineer the EXE, attach real-time memory monitoring for game state, and write sophisticated algorithms within a reasonable amount of time.
+I used to write programs to play games automatically — it was my way of learning programming and machine learning. 特訓９９ is one of the games I played when I was young. It would be fun if I could write a program to play it, but at the time it was too difficult for me.
+
+Now with all the new AI tools, I can reverse-engineer the EXE, attach real-time memory monitoring for game state, and write sophisticated algorithms within a reasonable amount of time.
 
 ## AI Performance (Simulator, Normal Difficulty, 50s Cap)
 
