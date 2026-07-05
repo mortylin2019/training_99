@@ -2,7 +2,11 @@
 
 Reverse-engineered Japanese bullet-hell survival game. Python AIs attach to the live process via `ReadProcessMemory`/`WriteProcessMemory`, read bullet positions, and play autonomously by writing direction bitmasks directly to the game's input register.
 
-**[▶ Watch demo (153.7s survival, Normal)](logs/videos/ai_beam_r2_20260705_145106_153.7s.mp4)**
+### [▶ Watch Demo — 153.7s survival, Normal difficulty](demo/ai_beam_normal_153s.mp4)
+
+<p align="center">
+  <i>ai_beam dodging 50+ bullets at once — beam search with 80-frame lookahead</i>
+</p>
 
 ## AI Performance (Simulator, Normal Difficulty, 50s Cap)
 
