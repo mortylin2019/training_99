@@ -6,9 +6,10 @@ Reverse-engineered Japanese bullet-hell survival game. Python AIs attach to the 
 
 <p align="center">
   <a href="https://youtu.be/qBO9xRoYYME">
-    <img src="https://img.youtube.com/vi/qBO9xRoYYME/maxresdefault.jpg" width="600" alt="Training 99 AI Demo">
+    <img src="https://img.youtube.com/vi/qBO9xRoYYME/hqdefault.jpg" width="480" alt="Training 99 AI Demo">
   </a>
   <br><i>ai_beam dodging 50+ bullets — beam search with 80-frame lookahead</i>
+  <br><sub>(if thumbnail doesn't load, <a href="https://youtu.be/qBO9xRoYYME">click here</a>)</sub>
 </p>
 
 ## AI Performance (Simulator, Normal Difficulty, 50s Cap)
