@@ -10,6 +10,12 @@ Reverse-engineered Japanese bullet-hell survival game. Python AIs attach to the 
   <br><i>ai_beam dodging 50+ bullets — beam search with 80-frame lookahead</i>
 </p>
 
+## Why
+
+I started writing game bots to learn programming and machine learning. 特訓９９ was one of the games I grew up playing — a brutal bullet-hell where surviving 30 seconds felt like an achievement. Back then, writing an AI to play it was way beyond me. The memory layout was unknown, the physics were a black box, and I didn't have the skills to reverse-engineer a 20-year-old binary.
+
+A decade later, the tools caught up. Ghidra decompiled the EXE. radare2 verified every instruction against a Python simulator. LLMs helped me read assembly and spot bugs in my C reimplementations. What would have taken months alone took days with AI-assisted reverse engineering. The result: a faithful offline game replica, a beam search AI that survives 150+ seconds, and a neural network trained on its own decision data — all built by someone who just wanted to beat his childhood game.
+
 ## AI Performance (Simulator, Normal Difficulty, 50s Cap)
 
 | AI | Avg | Best | Worst | Approach |
