@@ -162,9 +162,10 @@ class AIVisualizer:
 
             self._build_canvas_panel(left_frame)
 
-            # Right panel — stats (compact, no forced width)
-            right_frame = tk.Frame(main_frame, bg=BG_PANEL)
+            # Right panel — stats
+            right_frame = tk.Frame(main_frame, bg=BG_PANEL, width=190)
             right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0))
+            right_frame.pack_propagate(False)
 
             self._build_stats_panel(right_frame)
 
@@ -242,12 +243,12 @@ class AIVisualizer:
             tk.Label(
                 row, text=f"{name}:", bg=BG_PANEL,
                 fg=TEXT_SECONDARY, font=("Consolas", 9),
-                anchor=tk.W, width=12,
+                anchor=tk.W, width=10,
             ).pack(side=tk.LEFT)
             val = tk.Label(
                 row, text=default, bg=BG_PANEL,
                 fg=TEXT_PRIMARY, font=("Consolas", 9, "bold"),
-                anchor=tk.E,
+                anchor=tk.E, width=10,
             )
             val.pack(side=tk.RIGHT)
             self.stat_labels[name] = val

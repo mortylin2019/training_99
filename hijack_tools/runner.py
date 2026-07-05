@@ -117,7 +117,7 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
                 )
                 _monitor_hwnd = viz.monitor_hwnd
                 if _monitor_hwnd:
-                    viz.position_at(20 + gw, 30, height=gh)
+                    viz.position_at(20 + gw, 30)
                 logger.info(f"🪟 Windows: game=({20},30) {gw}x{gh}, monitor=({20+gw},30)")
             except Exception as e:
                 logger.warning(f"Window placement failed: {e}")
