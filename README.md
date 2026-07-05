@@ -5,6 +5,7 @@ Reverse-engineered Japanese bullet-hell survival game. Python AIs attach to the 
 <p align="center">
   <video src="demo/ai_beam_153s.mp4" controls width="100%"></video>
   <br><i>ai_beam — 153.7s survival on Normal difficulty</i>
+  <br><sub>also on <a href="https://youtu.be/qBO9xRoYYME">YouTube</a></sub>
 </p>
 
 ## AI Performance (Simulator, Normal Difficulty, 50s Cap)
