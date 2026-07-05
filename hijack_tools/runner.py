@@ -101,25 +101,26 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
     if viz and game.hwnd:
         import ctypes
         from ctypes import wintypes
-        # Wait for visualizer window to be ready
-        time.sleep(0.3)
-        # Move game to (20, 30)
-        try:
-            hwnd = ctypes.wintypes.HWND(game.hwnd)
-            wr = wintypes.RECT()
-            ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(wr))
-            gw = wr.right - wr.left
-            gh = wr.bottom - wr.top
-            ctypes.windll.user32.SetWindowPos(
-                hwnd, 0, 20, 30, gw, gh, 0x0004 | 0x0040,
-            )
-            # Move monitor flush-right of game, match game height
-            _monitor_hwnd = viz.monitor_hwnd
-            if _monitor_hwnd:
-                viz.position_at(20 + gw, 30, height=gh)
-            logger.info(f"🪟 Windows: game=({20},30) {gw}x{gh}, monitor=({20+gw},30)")
-        except Exception as e:
-            logger.warning(f"Window placement failed: {e}")
+        # Wait for visualizer window to actually appear
+        if not viz._ui_ready.wait(timeout=5.0):
+            logger.warning("Visualizer window did not appear in time — skipping placement")
+        else:
+            time.sleep(0.2)  # extra settle time
+            try:
+                hwnd = ctypes.wintypes.HWND(game.hwnd)
+                wr = wintypes.RECT()
+                ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(wr))
+                gw = wr.right - wr.left
+                gh = wr.bottom - wr.top
+                ctypes.windll.user32.SetWindowPos(
+                    hwnd, 0, 20, 30, gw, gh, 0x0004 | 0x0040,
+                )
+                _monitor_hwnd = viz.monitor_hwnd
+                if _monitor_hwnd:
+                    viz.position_at(20 + gw, 30, height=gh)
+                logger.info(f"🪟 Windows: game=({20},30) {gw}x{gh}, monitor=({20+gw},30)")
+            except Exception as e:
+                logger.warning(f"Window placement failed: {e}")
 
     history = []
     run_count = 0

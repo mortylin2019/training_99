@@ -184,8 +184,13 @@ class AIVisualizer:
     def position_at(self, x, y, height=None):
         """Move this monitor window to (x, y), optionally matching a height."""
         try:
-            mw = self.root.winfo_reqwidth()
-            mh = height if height else self.root.winfo_reqheight()
+            self.root.update_idletasks()
+            mw = self.root.winfo_width()
+            if mw < 50:
+                mw = self.root.winfo_reqwidth()
+            mh = height if height else self.root.winfo_height()
+            if mh < 50:
+                mh = self.root.winfo_reqheight()
             self.root.geometry(f"{mw}x{mh}+{x}+{y}")
         except Exception:
             pass
