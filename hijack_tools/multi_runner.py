@@ -62,8 +62,8 @@ def send_enter(hwnd):
 def _warmup_ai(ai):
     """Force JIT compilation before gameplay starts."""
     from bullet_data import Bullet
-    fake = [Bullet(raw_x=0x8000, raw_y=0x4000, angle_index=10, active=1,
-                   type=0, timer=0, index=0, vx=0, vy=0) for _ in range(20)]
+    fake = [Bullet(raw_x=0x8000, raw_y=0x4000, angle_index=10, grazed=0,
+                   type=0, timer=0, counter=0, vx=0, vy=0) for _ in range(20)]
     for _ in range(3):
         ai.decide(152, 44, fake)
     logger.debug("AI warmup complete")

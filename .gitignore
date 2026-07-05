@@ -200,3 +200,22 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ── Project-specific ──
+
+# Training data (regeneratable)
+training_data/
+
+# Session state
+.omo/run-continuation/
+
+# Debian packages
+*.deb
+
+# DLL files (game binary / compiled extensions)
+*.dll
+*.exe
+
+# Video recordings (large binary files)
+logs/videos/
+

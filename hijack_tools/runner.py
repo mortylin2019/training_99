@@ -182,7 +182,7 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
                         f"{ai_name}_r{run_count}_{ts}.mp4"
                     )
                     recorder = VideoRecorder(
-                        game.hwnd, output_path=video_path, fps=80,
+                        game.hwnd, output_path=video_path, fps=60,
                         second_hwnd=_monitor_hwnd,
                     )
                     recorder.start()

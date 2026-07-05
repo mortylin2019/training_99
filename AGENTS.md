@@ -1,5 +1,7 @@
 # AGENTS.md — AI Assistant Instructions for `training_99`
 
+**Generated:** 2026-06-30 | **Commit:** e52c08c | **Branch:** main
+
 ## Project Overview
 
 This is a **reverse engineering project** for **特訓９９ (Training 99)**, a Japanese bullet-hell survival game from the early 2000s. The original binary (`raw/99.exe`) has been decompiled via Ghidra and analyzed. Python "AI hijack" bots attach to the live game process via `ReadProcessMemory`/`WriteProcessMemory`, read bullet positions and game state, and play the game autonomously via direct input bitmask writes.
@@ -171,6 +173,72 @@ There are three ways to control the player, from worst to best:
 - `breakdown_and_translate.py`: Splits monolithic decompiled C into logical modules, decodes Shift-JIS strings, renames variables
 - `reverse_data.py`: Extracts encrypted ranking table, exports as JSON
 - `analyze_exe_strings.py`, `dump_all_strings.py`, `dump_table.py`: String/data extraction utilities
+
+---
+
+## CODE MAP
+
+| Symbol | Type | Location | Role |
+|--------|------|----------|------|
+| `GameControl` | class | `hijack_tools/game_control.py` | Process I/O: launch `99.exe`, ReadProcessMemory/WriteProcessMemory, game state access. Foundation for ALL live-game operations. |
+| `SuperiorAI` | class | `hijack_tools/ai_direct.py` | Top-tier AI: Two-Pass Time-Space Danger Grid. Pure function (state → bitmask). No I/O. |
+| `BeamAI` | class | `hijack_tools/ai_beam.py` | Beam search AI with JIT-compiled danger prediction. Uses `algo_config.py`. Optional C DLL fallback. |
+| `Bullet` | dataclass | `hijack_tools/bullet_data.py` | Bullet entity data model. Raw coords, pixel conversion, type enum. Shared by game_control + all AIs. |
+| `GameSimulator` | class | `hijack_tools/simulator/engine.py` | Faithful 99.exe replica. Orchestrates bullet/physics/RNG/patterns. No live game needed. |
+| `compute_aimed_angle` | function | `hijack_tools/simulator/functions.py` | Assembly-verified reimplementation of `FUN_00402d68`. Bullet→player angle with octant search. |
+| `RNG` | class | `hijack_tools/simulator/rng.py` | LCG: `state = state*0x343FD+0x269EC3`. Matches game's RNG exactly. |
+| `VEL_TABLE`, `ACCEL_TABLE` | arrays | `hijack_tools/simulator/tables.py` | 64-angle velocity/acceleration lookup tables extracted from live `99.exe`. |
+| `config.py` / `config.yaml` | config | `hijack_tools/simulator/` | Game constants (screen dims, hitboxes, timing, bullet counts). Validated against decompiled C. |
+| `runner` (hijack) | script | `hijack_tools/runner.py` | Main entry: launch game → AI loop → N runs. `--ai`, `--runs` flags. |
+| `runner` (sim) | script | `hijack_tools/simulator/runner.py` | Simulator benchmark. Offline AI survival testing via ProcessPool. `--ai ai_beam --runs 500`. |
+| `GameOracle` | class | `tests/test_oracle.py` | Save/restore game state, single-frame stepping for cross-validation tests. |
+
+---
+
+## WHERE TO LOOK
+
+| Task | Location | Notes |
+|------|----------|-------|
+| **Fix AI survival logic** | `hijack_tools/ai_direct.py` (150 loc) or `ai_beam.py` (253 loc) | Pure functions: state in → bitmask out. No I/O. |
+| **Change game constants** | `hijack_tools/simulator/config.py` + `config.yaml` | Change BOTH (they're duplicated). Also verify against decompiled C. |
+| **Add new AI algorithm** | Create new file in `hijack_tools/`, import in `runner.py` | Follow `ai_direct.py` pattern: class with `decide(px, py, bullets) → direction`. |
+| **Verify Python matches real game** | `tests/test_cross_validate.py` | Launches 99.exe, writes memory, steps 1 frame, compares. Windows only. |
+| **Run tests without game binary** | `tests/test_functions.py` + `test_integration.py` | Pure Python, no 99.exe needed. |
+| **Understand game mechanics** | `doc/game_logic.md` | Authoritative human-readable spec. |
+| **Understand a specific C function** | `reverse_engineering_ref/asm/ANNOTATED.md` + `ANNOTATED.md` | Assembly is TRUTH. Decompiled C is reference only. |
+| **Find memory address** | This file (§ Key Technical Details) or `reverse_engineering_ref/memory_map.md` | Full memory map of game state. |
+| **Profile AI performance** | `hijack_tools/profile_ai.py` | cProfile benchmark. No live game needed. |
+| **Benchmark across difficulties** | `bench_beam.py` | C beam search benchmark, all 4 difficulties. |
+
+---
+
+## COMMANDS
+
+```bash
+# Tests (no binary needed)
+python tests/test_functions.py        # 30 unit tests
+python tests/test_integration.py      # 20 integration tests
+
+# Tests (requires 99.exe on Windows)
+python tests/test_cross_validate.py   # Python vs real binary
+python tests/test_oracle.py           # Live game oracle
+
+# Run AI (real game, Windows only)
+python hijack_tools/runner.py --ai ai_direct --runs 10
+python hijack_tools/multi_runner.py -n 4 --ai ai_beam
+
+# Run AI (simulated, no binary needed)
+python -m hijack_tools.simulator.runner --ai ai_beam --runs 500
+
+# Profile / Benchmark
+python hijack_tools/profile_ai.py
+python bench_beam.py
+
+# Reverse engineering tools
+python tools/extract_strings.py
+python tools/dump_table.py
+python tools/breakdown_and_translate.py
+```
 
 ---
 

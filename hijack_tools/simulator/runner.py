@@ -24,19 +24,28 @@ def _load_ai(name):
         try: from ai_beam import BeamAI
         except ImportError: from hijack_tools.ai_beam import BeamAI
         return BeamAI
-    if name == "ai_direct":
-        try: from ai_direct import SuperiorAI
-        except ImportError: from hijack_tools.ai_direct import SuperiorAI
-        return SuperiorAI
-    if name == "ai_rl":
-        try: from ai_rl import RLAgent
-        except ImportError: from hijack_tools.ai_rl import RLAgent
-        return RLAgent
-    raise ValueError(f"Unknown AI: {name}")
+    if name == "ai_basic":
+        try: from ai_basic import BasicAI
+        except ImportError: from hijack_tools.ai_basic import BasicAI
+        return BasicAI
+    if name == "ai_nn":
+        try: from ai_nn import NNBoostedBeamAI
+        except ImportError: from hijack_tools.ai_nn import NNBoostedBeamAI
+        return NNBoostedBeamAI
+    if name == "ai_nn_greedy":
+        try: from ai_nn import NNGreedyAI
+        except ImportError: from hijack_tools.ai_nn import NNGreedyAI
+        return NNGreedyAI
+    raise ValueError(f"Unknown AI: {name}. Choices: ai_beam, ai_basic, ai_nn, ai_nn_greedy")
 
 
 def _run_one(args):
     """Single simulation (picklable for ProcessPool)."""
+    import sys, os
+    # Ensure hijack_tools is importable in subprocess
+    hijack_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if hijack_dir not in sys.path:
+        sys.path.insert(0, hijack_dir)
     ai_name, difficulty, max_frames, seed, spawn_interval_ms = args
     from .tables import VEL_TABLE, ACCEL_TABLE
 

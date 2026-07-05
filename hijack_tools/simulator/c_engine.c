@@ -163,32 +163,30 @@ static int compute_aimed_angle(int bx, int by, int px, int py,
     int dy = (py + PLAYER_CX) - (by >> RAW_SHIFT);
     int octant, divisor;
 
-    /* Octant determination (exact assembly branches) */
+    /* Octant determination — divisor=dy always (asm: idiv esi) */
     if (dx < 0) {
         if (dy <= 0) {
-            if (dy < dx)      { octant = 0x20; divisor = dy; }
-            else              { octant = 0x28; divisor = 0; }
+            octant = (dy < dx) ? 0x20 : 0x28;
+            divisor = dy;
         } else {
-            if (dx < -dy)     { octant = 0x18; divisor = dy; }
-            else              { octant = 0x10; divisor = dy; }
+            octant = (dx < -dy) ? 0x18 : 0x10;
+            divisor = dy;
         }
     } else if (dy < 0) {
-        if (dx < -dy)         { octant = 0x30; divisor = dx; }
-        else                  { octant = 0x38; divisor = 0; }
+        octant = (dx < -dy) ? 0x30 : 0x38;
+        divisor = dy;
     } else {
-        if (dx == 0)          { octant = 0x10; divisor = 0; }
-        else if (dy == 0)     { octant = 0;    divisor = 0; }
-        else if (dx < dy)     { octant = 8;    divisor = dy; }
-        else                  { octant = 0;    divisor = dy; }
+        if (dx == 0)          { octant = 0x10; divisor = dy; }
+        else if (dy == 0)     { octant = 0;    divisor = 0;  }
+        else                  { octant = (dx < dy) ? 8 : 0; divisor = dy; }
     }
 
     int angle;
-    if (divisor == 0) {
+    if (dy == 0) {
         angle = octant & 0xFF;
     } else {
-        /* quotient = abs((dx * 0x400) / divisor) */
-        int quotient = (dx * 0x400) / divisor;
-        if (quotient < 0) quotient = -quotient;
+        /* quotient = abs(dx * 0x400) / abs(dy) — truncation not floor */
+        int quotient = abs(dx * 0x400) / abs(dy);
 
         int best_diff = 0x10000;
         int entry_idx = octant & 0xFF;
@@ -885,7 +883,7 @@ EXPORT int sim_beam_search(GameState* s) {
 
 #if USE_CENTER_PULL
                 danger += fabs(nx - 152.0) * BS_CENTER_PULL;
-                danger += fabs(ny - 44.0) * BS_CENTER_PULL;
+                danger += fabs(ny - 112.0) * BS_CENTER_PULL;
 #endif
 
 #if USE_WALL_PENALTY
@@ -1020,7 +1018,7 @@ EXPORT int sim_beam_search_raw(int px, int py,
                 }
 #if USE_CENTER_PULL
                 danger += fabs(nx - 152.0) * BS_CENTER_PULL;
-                danger += fabs(ny - 44.0) * BS_CENTER_PULL;
+                danger += fabs(ny - 112.0) * BS_CENTER_PULL;
 #endif
 #if USE_WALL_PENALTY
                 if (nx < 10.0)      danger += (10.0 - nx) * 5000.0;

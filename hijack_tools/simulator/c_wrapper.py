@@ -6,7 +6,9 @@ Same API as engine.GameSimulator — drop-in replacement for benchmarking.
 import ctypes
 import os
 
-_DLL_PATH = os.path.join(os.path.dirname(__file__), "sim_core.dll")
+import sys
+_EXT = ".so" if sys.platform == "linux" else ".dll"
+_DLL_PATH = os.path.join(os.path.dirname(__file__), "sim_core" + _EXT)
 _lib = ctypes.CDLL(_DLL_PATH)
 
 # ── Type setup ──────────────────────────────────────────────
