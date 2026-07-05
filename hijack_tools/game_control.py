@@ -512,8 +512,20 @@ class GameControl:
         """Kills the game process if it is running."""
         if self.proc:
             logger.info(f"Closing game process (PID: {self.pid})...")
-            self.proc.terminate()
+            try:
+                self.proc.terminate()
+            except Exception:
+                pass
             try:
                 self.proc.wait(timeout=2)
             except subprocess.TimeoutExpired:
-                self.proc.kill()
+                try:
+                    self.proc.kill()
+                except Exception:
+                    pass
+            except KeyboardInterrupt:
+                # User pressed Ctrl+C during shutdown — force kill
+                try:
+                    self.proc.kill()
+                except Exception:
+                    pass

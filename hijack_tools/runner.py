@@ -3,10 +3,13 @@ runner.py — Connects GameControl (memory I/O) → AI algorithm → game.
 Full automation: detects title / game-over / ranking screens, auto-advances.
 
 Usage:
-    python hijack_tools/runner.py                     # 10 runs, ai_direct
+    python hijack_tools/runner.py                     # 10 runs, ai_beam
     python hijack_tools/runner.py --runs 20           # 20 runs
     python hijack_tools/runner.py --runs 0            # infinite
-    python hijack_tools/runner.py --ai my_algo        # swap algorithm
+    python hijack_tools/runner.py --ai ai_basic       # swap algorithm
+    python hijack_tools/runner.py --video             # record gameplay to MP4
+    python hijack_tools/runner.py --ui                # show AI monitor overlay
+    python hijack_tools/runner.py --ui --embed        # embed game into UI window
 """
 
 import time
@@ -33,19 +36,28 @@ STATE_TITLE, STATE_RESULT, STATE_RANKING = 0, 5, 6
 
 
 def load_ai(name):
-    if name == "ai_direct":
-        from ai_direct import SuperiorAI
-        return SuperiorAI
+    if name == "ai_basic":
+        from ai_basic import BasicAI
+        return BasicAI
     if name == "ai_beam":
         from ai_beam import BeamAI
         return BeamAI
+    if name == "ai_direct":
+        from ai_direct import SuperiorAI
+        return SuperiorAI
+    if name == "ai_nn":
+        from ai_nn import NNBoostedBeamAI
+        return NNBoostedBeamAI
+    if name == "ai_nn_greedy":
+        from ai_nn import NNGreedyAI
+        return NNGreedyAI
     if name == "ai_numba":
         from ai_beam import BeamAI
         return BeamAI  # legacy alias
-    raise ValueError(f"Unknown AI: {name}")
+    raise ValueError(f"Unknown AI: {name}. Choices: ai_basic, ai_beam, ai_direct, ai_nn, ai_nn_greedy")
 
 
-def run(ai_name="ai_direct", max_runs=10):
+def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
     game = GameControl()
     if not game.launch_game():
         logger.error("Failed to launch game")
@@ -56,13 +68,58 @@ def run(ai_name="ai_direct", max_runs=10):
 
     # Warm up JIT before game starts
     from bullet_data import Bullet
-    fake = [Bullet(raw_x=0x8000, raw_y=0x4000, angle_index=i, active=1,
-                   type=0, timer=0, index=0, vx=0, vy=0) for i in range(20)]
+    fake = [Bullet(raw_x=0x8000, raw_y=0x4000, angle_index=i, grazed=0,
+                   type=0, timer=0, counter=0, vx=0, vy=0) for i in range(20)]
     for _ in range(3):
         ai.decide(152, 44, fake)
 
     mode = f"{max_runs} runs" if max_runs > 0 else "infinite"
-    logger.info(f"Runner — AI:{ai_name} — {mode} — Ctrl+C to stop.")
+    flags = []
+    if video:
+        flags.append("🎬")
+    if ui:
+        flags.append("🖥️")
+    flag_str = " ".join(flags) + " " if flags else ""
+    logger.info(f"Runner — {flag_str}AI:{ai_name} — {mode} — Ctrl+C to stop.")
+
+    # ── Video recorder (created per-run) ──
+    recorder = None
+    _video_enabled = video
+
+    # ── AI Visualizer (created once, runs in background thread) ──
+    viz = None
+    if ui or embed:
+        try:
+            from ai_visualizer import AIVisualizer
+        except ImportError:
+            from hijack_tools.ai_visualizer import AIVisualizer
+        viz = AIVisualizer(game_hwnd=game.hwnd, embed=embed)
+        viz.start()
+
+    # ── Position windows side by side (after both are ready) ──
+    _monitor_hwnd = None
+    if viz and game.hwnd:
+        import ctypes
+        from ctypes import wintypes
+        # Wait for visualizer window to be ready
+        time.sleep(0.3)
+        # Move game to (20, 30)
+        try:
+            hwnd = ctypes.wintypes.HWND(game.hwnd)
+            wr = wintypes.RECT()
+            ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(wr))
+            gw = wr.right - wr.left
+            gh = wr.bottom - wr.top
+            ctypes.windll.user32.SetWindowPos(
+                hwnd, 0, 20, 30, gw, gh, 0x0004 | 0x0040,
+            )
+            # Move monitor flush-right of game, match game height
+            _monitor_hwnd = viz.monitor_hwnd
+            if _monitor_hwnd:
+                viz.position_at(20 + gw, 30, height=gh)
+            logger.info(f"🪟 Windows: game=({20},30) {gw}x{gh}, monitor=({20+gw},30)")
+        except Exception as e:
+            logger.warning(f"Window placement failed: {e}")
 
     history = []
     run_count = 0
@@ -112,10 +169,34 @@ def run(ai_name="ai_direct", max_runs=10):
                 _pred_px = _pred_py = None
                 logger.success(f"=== RUN {run_count} START ===")
 
+                # Start video recording for this run
+                if _video_enabled and game.hwnd:
+                    try:
+                        from video_capture import VideoRecorder
+                    except ImportError:
+                        from hijack_tools.video_capture import VideoRecorder
+                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    video_path = os.path.join(
+                        "logs", "videos",
+                        f"{ai_name}_r{run_count}_{ts}.mp4"
+                    )
+                    recorder = VideoRecorder(
+                        game.hwnd, output_path=video_path, fps=80,
+                        second_hwnd=_monitor_hwnd,
+                    )
+                    recorder.start()
+
             # ── Run ended ──
             if in_run and (not is_playing or is_dead):
                 in_run = False
-                
+
+                # Stop video recording for this run
+                _video_path = None
+                if recorder and recorder.is_recording:
+                    recorder.stop()
+                    _video_path = recorder.output_path
+                    recorder = None
+
                 # Save pre-death snapshot for analysis
                 try:
                     with open(f'logs/death_r{run_count}.json', 'w') as f:
@@ -130,14 +211,29 @@ def run(ai_name="ai_direct", max_runs=10):
                 ms = game.get_survival_ms()
                 frames = game.get_game_time()
                 mult = game.get_score_multiplier() or 1
+                survival_s = ms / 1000.0
                 history.append({
                     "run": run_count,
                     "survival_ms": ms,
-                    "survival_s": ms / 1000.0,
+                    "survival_s": survival_s,
                     "frames": frames,
                     "multiplier": mult,
                     "max_bullets": max_bullets,
                 })
+
+                # Rename video to include survival time
+                if _video_path and os.path.exists(_video_path):
+                    try:
+                        dirname = os.path.dirname(_video_path)
+                        base = os.path.basename(_video_path)
+                        # Insert survival time before .mp4
+                        new_name = base.replace(".mp4", f"_{survival_s:.1f}s.mp4")
+                        new_path = os.path.join(dirname, new_name)
+                        os.rename(_video_path, new_path)
+                        logger.info(f"🎬 Video renamed → {new_name}")
+                    except Exception:
+                        pass
+
                 logger.success(
                     f"=== DEAD | Run {run_count} | {ms}ms ({ms/1000:.1f}s) | "
                     f"Frames:{frames} | MaxB:{max_bullets} ==="
@@ -204,6 +300,37 @@ def run(ai_name="ai_direct", max_runs=10):
                 bits = ai.decide(px, py, active)
                 game.write_int(0x00406d7c, bits)
 
+                # ── Capture video frame ──
+                if recorder and recorder.is_recording:
+                    recorder.capture_frame()
+
+                # ── Update AI visualizer ──
+                if viz:
+                    move_name = kbd.get_key_name(bits)
+                    # Compute nearest bullet distance
+                    nearest = "—"
+                    if active:
+                        min_d2 = min(
+                            ((b.x - px) ** 2 + (b.y - py) ** 2)
+                            for b in active
+                        )
+                        nearest = f"{min_d2 ** 0.5:.0f}px"
+                    viz.update(
+                        px=px, py=py,
+                        bullets=active,
+                        stats={
+                            "run": run_count,
+                            "survival": f"{game.get_survival_ms()/1000:.1f}s" if game.get_survival_ms() else "—",
+                            "frames": run_frames,
+                            "bullets": len(active),
+                            "nearest": nearest,
+                            "pattern": game.get_next_pattern() or 0,
+                            "algo": ai_name,
+                        },
+                        ai_move=move_name,
+                        is_playing=True,
+                    )
+
                 # ── Save pre-death snapshot ──
                 _last_snapshot = {
                     'px': px, 'py': py,
@@ -239,7 +366,25 @@ def run(ai_name="ai_direct", max_runs=10):
         logger.info("Stopped by user.")
     finally:
         _stop.set()
-        game.cleanup()
+        # Stop any active recording
+        if recorder and recorder.is_recording:
+            try:
+                recorder.stop()
+            except Exception:
+                pass
+        # Stop visualizer
+        if viz:
+            try:
+                viz.stop()
+            except Exception:
+                pass
+        # Clean up game process (may block briefly; guard against double-Ctrl+C)
+        try:
+            game.cleanup()
+        except KeyboardInterrupt:
+            pass
+        except Exception:
+            pass
 
     if history:
         print_summary(history)
@@ -283,5 +428,11 @@ if __name__ == "__main__":
     p.add_argument("--ai", default="ai_direct", help="AI algorithm module")
     p.add_argument("--runs", type=int, default=10,
                    help="Number of runs (0=infinite)")
+    p.add_argument("--video", action="store_true",
+                   help="Record gameplay to MP4 video (requires ffmpeg + mss)")
+    p.add_argument("--ui", action="store_true",
+                   help="Show AI monitor overlay window with live stats + bullet viz")
+    p.add_argument("--embed", action="store_true",
+                   help="Embed the game window inside the AI monitor (implies --ui)")
     args = p.parse_args()
-    run(args.ai, args.runs)
+    run(args.ai, args.runs, video=args.video, ui=args.ui or args.embed, embed=args.embed)
