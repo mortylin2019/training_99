@@ -75,6 +75,7 @@ class AIVisualizer:
             "is_playing": False,
         }
         self._frame_time = time.time()
+        self._trail = []  # (px, py, age) — fading player movement trail
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -337,6 +338,23 @@ class AIVisualizer:
             color = BULLET_COLORS.get(b.type, "#ffffff")
             r = 2
             c.create_oval(bx - r, by - r, bx + r, by + r, fill=color, outline="")
+
+        # ── Draw player trail (fading white dots) ──
+        self._trail.append((px, py, time.time()))
+        if len(self._trail) > 60:
+            self._trail = self._trail[-60:]
+        now = time.time()
+        for tx, ty, t in self._trail:
+            age = now - t
+            if age > 2.0:
+                continue
+            alpha = max(0, int(255 * (1.0 - age / 2.0)))
+            color = f"#{alpha:02x}{alpha:02x}{alpha:02x}"
+            c.create_oval(
+                tx * SCALE - 1, ty * SCALE - 1,
+                tx * SCALE + 1, ty * SCALE + 1,
+                fill=color, outline="",
+            )
 
         # ── Draw player ──
         pr = 4
