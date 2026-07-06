@@ -206,7 +206,6 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
             # ── Run ended ──
             if in_run and (not is_playing or is_dead):
                 in_run = False
-                is_warmup = not _warmup_done
 
                 # Stop video and rename with survival time
                 _video_path = None
