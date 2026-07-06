@@ -138,10 +138,13 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
     history = []
     run_count = 0
     in_run = False
+    _warmup_done = False
     max_bullets = 0
     run_frames = 0
     last_log = 0.0
     last_screen = -1
+    _video_end_time = 0.0  # keep capturing until this time after death
+    _video_survival_s = 0.0
 
     # ── Bits→movement lookup + prediction tracker ──
     _BITS_MAP = {0:(0,0), 1:(-1,0), 8:(1,0), 2:(0,-1), 4:(0,1),
@@ -188,10 +191,14 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
                 run_frames = 0
                 run_count += 1
                 _pred_px = _pred_py = None
-                logger.success(f"=== RUN {run_count} START ===")
+                is_warmup = not _warmup_done
+                if is_warmup:
+                    logger.info(f"=== WARMUP RUN (JIT) ===")
+                else:
+                    logger.success(f"=== RUN {run_count} START ===")
 
-                # Start video recording for this run
-                if _video_enabled and game.hwnd:
+                # Start video recording (skip warmup run)
+                if _video_enabled and game.hwnd and not is_warmup:
                     try:
                         from video_capture import VideoRecorder
                     except ImportError:
@@ -210,61 +217,67 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
             # ── Run ended ──
             if in_run and (not is_playing or is_dead):
                 in_run = False
+                is_warmup = not _warmup_done
 
-                # Stop video recording for this run
-                _video_path = None
+                # Defer video stop: keep capturing 3s for death anim + result + ranking
                 if recorder and recorder.is_recording:
-                    recorder.stop()
-                    _video_path = recorder.output_path
-                    recorder = None
+                    _video_end_time = time.time() + 3.0
 
-                # Save pre-death snapshot for analysis
-                try:
-                    with open(f'logs/death_r{run_count}.json', 'w') as f:
-                        json.dump(_last_snapshot, f)
-                    nbullets = len(_last_snapshot['bullets'])
-                    logger.debug(f'Saved death snapshot: {nbullets} bullets')
-                except NameError:
-                    pass
-                except Exception as e:
-                    logger.warning(f'Failed to save death snapshot: {e}')
+                # Save pre-death snapshot (skip warmup)
+                if not is_warmup:
+                    try:
+                        with open(f'logs/death_r{run_count}.json', 'w') as f:
+                            json.dump(_last_snapshot, f)
+                    except (NameError, Exception):
+                        pass
                 
                 ms = game.get_survival_ms()
                 frames = game.get_game_time()
                 mult = game.get_score_multiplier() or 1
                 survival_s = ms / 1000.0
-                history.append({
-                    "run": run_count,
-                    "survival_ms": ms,
-                    "survival_s": survival_s,
-                    "frames": frames,
-                    "multiplier": mult,
-                    "max_bullets": max_bullets,
-                })
+                _video_survival_s = survival_s
 
-                # Rename video to include survival time
-                if _video_path and os.path.exists(_video_path):
-                    try:
-                        dirname = os.path.dirname(_video_path)
-                        base = os.path.basename(_video_path)
-                        # Insert survival time before .mp4
-                        new_name = base.replace(".mp4", f"_{survival_s:.1f}s.mp4")
-                        new_path = os.path.join(dirname, new_name)
-                        os.rename(_video_path, new_path)
-                        logger.info(f"🎬 Video renamed → {new_name}")
-                    except Exception:
-                        pass
-
-                logger.success(
-                    f"=== DEAD | Run {run_count} | {ms}ms ({ms/1000:.1f}s) | "
-                    f"Frames:{frames} | MaxB:{max_bullets} ==="
-                )
+                if is_warmup:
+                    _warmup_done = True
+                    logger.info(f"=== WARMUP DONE ({survival_s:.1f}s) ===")
+                else:
+                    history.append({
+                        "run": run_count,
+                        "survival_ms": ms,
+                        "survival_s": survival_s,
+                        "frames": frames,
+                        "multiplier": mult,
+                        "max_bullets": max_bullets,
+                    })
+                    logger.success(
+                        f"=== DEAD | Run {run_count} | {ms}ms ({survival_s:.1f}s) | "
+                        f"Frames:{frames} | MaxB:{max_bullets} ==="
+                    )
                 game.write_int(0x00406d7c, 0)
                 time.sleep(0.3)
 
                 if max_runs > 0 and run_count >= max_runs:
                     logger.success(f"All {max_runs} runs complete.")
                     break
+
+            # ── Stop deferred video capture ──
+            if _video_end_time > 0 and time.time() >= _video_end_time:
+                if recorder and recorder.is_recording:
+                    _video_path = recorder.output_path
+                    recorder.stop()
+                    recorder = None
+                    _video_end_time = 0.0
+                    # Rename video to include survival time
+                    if _video_path and os.path.exists(_video_path):
+                        try:
+                            dirname = os.path.dirname(_video_path)
+                            base = os.path.basename(_video_path)
+                            new_name = base.replace(".mp4", f"_{_video_survival_s:.1f}s.mp4")
+                            new_path = os.path.join(dirname, new_name)
+                            os.rename(_video_path, new_path)
+                            logger.info(f"🎬 Video saved → {new_name}")
+                        except Exception:
+                            pass
 
             # ── Auto-advance screens ──
             if not is_playing and not in_run:
@@ -276,6 +289,9 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
                     last_screen = state
 
                 game.press_enter()
+                # Capture video during auto-advance (death anim, result, ranking)
+                if recorder and recorder.is_recording:
+                    recorder.capture_frame()
                 time.sleep(0.15)
                 continue
 
