@@ -66,12 +66,25 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
     AI = load_ai(ai_name)
     ai = AI(vel_table=game.vel_table, accel_table=game.accel_table)
 
-    # Warm up JIT before game starts
+    # Warm up JIT before game starts — thorough to avoid first-run death
     from bullet_data import Bullet
-    fake = [Bullet(raw_x=0x8000, raw_y=0x4000, angle_index=i, grazed=0,
-                   type=0, timer=0, counter=0, vx=0, vy=0) for i in range(20)]
-    for _ in range(3):
+    import random
+    fake = []
+    for i in range(80):
+        fake.append(Bullet(
+            raw_x=random.randint(0x4000, 0xC000),
+            raw_y=random.randint(0x2000, 0xA000),
+            angle_index=random.randint(0, 63),
+            grazed=0, type=random.choice([0, 0, 0, 1, 2, 3]),
+            timer=random.randint(0, 48), counter=0,
+            vx=random.randint(-200, 200), vy=random.randint(-200, 200),
+        ))
+    logger.debug(f"Warming up {ai_name} with {len(fake)} varied bullets...")
+    t0 = time.perf_counter()
+    for i in range(5):
         ai.decide(152, 44, fake)
+    warmup_ms = (time.perf_counter() - t0) * 1000
+    logger.debug(f"Warm-up complete ({warmup_ms:.0f}ms)")
 
     mode = f"{max_runs} runs" if max_runs > 0 else "infinite"
     flags = []
@@ -298,7 +311,11 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
                         'vx': rvx/64.0, 'vy': rvy/64.0
                     }
 
+                _t0 = time.perf_counter()
                 bits = ai.decide(px, py, active)
+                _dt = (time.perf_counter() - _t0) * 1000
+                if run_frames <= 3 and _dt > 10:
+                    logger.warning(f"Slow decide() on frame {run_frames}: {_dt:.0f}ms (JIT?)")
                 game.write_int(0x00406d7c, bits)
 
                 # ── Capture video frame ──
