@@ -159,6 +159,13 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
             with _lock:
                 _state["px"] = px; _state["py"] = py
                 _state["active"] = active; _state["ready"] = True
+            # Update visualizer from reader thread (200Hz, no AI dependency)
+            if viz:
+                nearest = "—"
+                if active:
+                    min_d2 = min((b.x - px)**2 + (b.y - py)**2 for b in active)
+                    nearest = f"{min_d2 ** 0.5:.0f}px"
+                viz.update(px=px, py=py, bullets=active, stats={"nearest": nearest})
             _stop.wait(0.005)  # ~200 Hz, game runs at 80 Hz
 
     _thread = threading.Thread(target=_reader, daemon=True)
@@ -322,26 +329,15 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
                 if recorder and recorder.is_recording:
                     recorder.capture_frame()
 
-                # ── Update AI visualizer ──
+                # ── Update AI visualizer (stats + move only; bullets done by reader) ──
                 if viz:
                     move_name = kbd.get_key_name(bits)
-                    # Compute nearest bullet distance
-                    nearest = "—"
-                    if active:
-                        min_d2 = min(
-                            ((b.x - px) ** 2 + (b.y - py) ** 2)
-                            for b in active
-                        )
-                        nearest = f"{min_d2 ** 0.5:.0f}px"
                     viz.update(
-                        px=px, py=py,
-                        bullets=active,
                         stats={
                             "run": run_count,
                             "survival": f"{game.get_survival_ms()/1000:.1f}s" if game.get_survival_ms() else "—",
                             "frames": run_frames,
                             "bullets": len(active),
-                            "nearest": nearest,
                             "pattern": game.get_next_pattern() or 0,
                             "algo": ai_name,
                         },
