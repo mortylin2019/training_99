@@ -142,6 +142,7 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
     run_frames = 0
     last_log = 0.0
     last_screen = -1
+    _video_survival_s = 0.0
 
     # ── Bits→movement lookup + prediction tracker ──
     _BITS_MAP = {0:(0,0), 1:(-1,0), 8:(1,0), 2:(0,-1), 4:(0,1),
@@ -186,8 +187,20 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
                 _pred_px = _pred_py = None
                 logger.success(f"=== RUN {run_count} START ===")
 
-                # Start video recording
+                # Start video recording (stop previous, rename with survival time)
                 if _video_enabled and game.hwnd:
+                    if recorder and recorder.is_recording:
+                        _video_path = recorder.output_path
+                        recorder.stop()
+                        recorder = None
+                        if _video_path and os.path.exists(_video_path) and _video_survival_s > 0:
+                            try:
+                                d, base = os.path.split(_video_path)
+                                new_name = base.replace(".mp4", f"_{_video_survival_s:.1f}s.mp4")
+                                os.rename(_video_path, os.path.join(d, new_name))
+                                logger.info(f"🎬 Video → {new_name}")
+                            except Exception:
+                                pass
                     try:
                         from video_capture import VideoRecorder
                     except ImportError:
@@ -207,13 +220,6 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
             if in_run and (not is_playing or is_dead):
                 in_run = False
 
-                # Stop video and rename with survival time
-                _video_path = None
-                if recorder and recorder.is_recording:
-                    recorder.stop()
-                    _video_path = recorder.output_path
-                    recorder = None
-
                 # Save pre-death snapshot
                 try:
                     with open(f'logs/death_r{run_count}.json', 'w') as f:
@@ -225,6 +231,7 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
                 frames = game.get_game_time()
                 mult = game.get_score_multiplier() or 1
                 survival_s = ms / 1000.0
+                _video_survival_s = survival_s
                 history.append({
                     "run": run_count,
                     "survival_ms": ms,
@@ -233,16 +240,6 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
                     "multiplier": mult,
                     "max_bullets": max_bullets,
                 })
-
-                # Rename video with survival time
-                if _video_path and os.path.exists(_video_path):
-                    try:
-                        d, base = os.path.split(_video_path)
-                        new_name = base.replace(".mp4", f"_{survival_s:.1f}s.mp4")
-                        os.rename(_video_path, os.path.join(d, new_name))
-                        logger.info(f"🎬 Video → {new_name}")
-                    except Exception:
-                        pass
 
                 logger.success(
                     f"=== DEAD | Run {run_count} | {ms}ms ({survival_s:.1f}s) | "
@@ -265,6 +262,9 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
                     last_screen = state
 
                 game.press_enter()
+                # Capture video during cut scenes (death anim, result, ranking)
+                if recorder and recorder.is_recording:
+                    recorder.capture_frame()
                 time.sleep(0.15)
                 continue
 
@@ -374,10 +374,15 @@ def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
         logger.info("Stopped by user.")
     finally:
         _stop.set()
-        # Stop any active recording
+        # Stop any active recording + rename final video
         if recorder and recorder.is_recording:
             try:
+                _video_path = recorder.output_path
                 recorder.stop()
+                if _video_path and os.path.exists(_video_path) and _video_survival_s > 0:
+                    d, base = os.path.split(_video_path)
+                    new_name = base.replace(".mp4", f"_{_video_survival_s:.1f}s.mp4")
+                    os.rename(_video_path, os.path.join(d, new_name))
             except Exception:
                 pass
         # Stop visualizer
