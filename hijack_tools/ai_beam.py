@@ -60,14 +60,10 @@ try:
         MOVES, BITS, N_ACTIONS, SPEED,
         SCR_W, SCR_H, CTR_X, CTR_Y,
         BEAM_DEPTH, BEAM_WIDTH, CHECK_EVERY,
-        C_BEAM_DEPTH, C_CHECK_EVERY,
         COLLISION_VAL, DANGER_BASE, DANGER_POWER, DANGER_DECAY, SAFETY_MARGIN,
         CENTER_PULL, WALL_PENALTY, WALL_MARGIN,
         HIT_X1, HIT_X2, HIT_Y1, HIT_Y2,
-        USE_INVERSE_SQUARE, USE_COLLISION, USE_CENTER_PULL,
-        USE_WALL_PENALTY, USE_SAFETY_MARGIN, USE_TIME_WEIGHTING, USE_TIEBREAK,
         TIME_WEIGHT_BASE, TIME_WEIGHT_RATE,
-        USE_C_BEAM
     )
 except ImportError:
     from hijack_tools.algo_config import (
@@ -75,14 +71,10 @@ except ImportError:
         MOVES, BITS, N_ACTIONS, SPEED,
         SCR_W, SCR_H, CTR_X, CTR_Y,
         BEAM_DEPTH, BEAM_WIDTH, CHECK_EVERY,
-        C_BEAM_DEPTH, C_CHECK_EVERY,
         COLLISION_VAL, DANGER_BASE, DANGER_POWER, DANGER_DECAY, SAFETY_MARGIN,
         CENTER_PULL, WALL_PENALTY, WALL_MARGIN,
         HIT_X1, HIT_X2, HIT_Y1, HIT_Y2,
-        USE_INVERSE_SQUARE, USE_COLLISION, USE_CENTER_PULL,
-        USE_WALL_PENALTY, USE_SAFETY_MARGIN, USE_TIME_WEIGHTING, USE_TIEBREAK,
         TIME_WEIGHT_BASE, TIME_WEIGHT_RATE,
-        USE_C_BEAM
     )
 
 # Convert to numpy arrays for numba JIT
@@ -90,7 +82,7 @@ MOVES = np.array(MOVES, dtype=np.int32)
 BITS = np.array(BITS, dtype=np.int32)
 
 # Compute effective margins based on toggles
-_EFF_MARGIN = SAFETY_MARGIN if USE_SAFETY_MARGIN else 0.0
+_EFF_MARGIN = SAFETY_MARGIN  # always enabled in Python beam
 
 
 @njit(cache=True)
@@ -298,23 +290,10 @@ def _max_gap_move(px, py, bullets_arr):
 
 
 class BeamAI:
-    """
-    Beam search AI. Uses C engine (CHECK_EVERY=1) when DLL available,
-    falls back to Python beam (CHECK_EVERY=4) otherwise.
-    """
+    """Beam search AI. JIT-compiled with numba for real-time performance."""
 
     def __init__(self, vel_table=None, accel_table=None):
         self.vel_table = np.array(vel_table or [(0, 0)], dtype=np.float32)
-        self._c_available = False
-        try:
-            from hijack_tools.simulator.c_wrapper import CSimulator
-            self._c_available = True
-        except Exception:
-            try:
-                from simulator.c_wrapper import CSimulator
-                self._c_available = True
-            except Exception:
-                pass
 
     def _velocity(self, angles):
         idx = np.clip((angles & 0x3F).astype(np.int32), 0, len(self.vel_table) - 1)
@@ -373,18 +352,7 @@ class BeamAI:
                     best_dot, best_idx = dot, mi
             return int(BITS[best_idx])
 
-        # ── C engine path (CHECK_EVERY=1, 1px steps) ──
-        if USE_C_BEAM and self._c_available:
-            active = [(b.x, b.y, b.angle_index) for b in bullets
-                      if b.angle_index != 0xFF]
-            if active:
-                try:
-                    from hijack_tools.simulator.c_wrapper import c_beam_search
-                except ImportError:
-                    from simulator.c_wrapper import c_beam_search
-                return c_beam_search(px, py, active)
-
-        # ── Python search (beam or MC based on config)
+        # ── Beam search
         paths = self._predict(bullets)
         if USE_MC_SEARCH:
             best = int(_mc_search(float(px), float(py), paths))

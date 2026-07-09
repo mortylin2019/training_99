@@ -68,11 +68,7 @@ HIT_Y1, HIT_Y2 = 0.0, 10.0    # 10px tall
 # C engine path:          CHECK_EVERY=1, DEPTH=160
 BEAM_DEPTH   = 20       # 80 frames lookahead at CHECK_EVERY=4
 BEAM_WIDTH   = 50  # wide beam preserves escape paths       # wider beam preserves escape paths through early pruning
-CHECK_EVERY  = 4        # frames per beam step (1 when C engine available)
-
-# Overrides when C engine beam search is active
-C_BEAM_DEPTH  = 160     # 2.0s at 80 FPS, 1px steps
-C_CHECK_EVERY = 1       # pixel-perfect paths
+CHECK_EVERY  = 4        # frames per beam step
 
 # ── Scoring weights ────────────────────────────────────────
 COLLISION_VAL = 1e8          # fatal: in hitbox = instant discard
@@ -88,22 +84,5 @@ WALL_MARGIN   = 40.0         # px from edge where penalty starts (early warning)
 TIME_WEIGHT_BASE = 0.5       # w = 1 / (base + t * rate)
 TIME_WEIGHT_RATE = 0.03      # farther future = lower weight
 
-# ── Scoring toggles (True = enabled, False = disabled) ─────
-# Toggle individual scoring components to find optimal combination.
-# These affect both Python and C beam search paths.
-USE_INVERSE_SQUARE = True    # 1/d² danger from bullets (core mechanic)
-USE_COLLISION      = True    # instant-death hitbox check
-USE_CENTER_PULL    = True    # gentle pull toward screen center
-USE_WALL_PENALTY   = True    # penalty for being near edges
-USE_SAFETY_MARGIN  = True    # extra clearance around hitbox
-USE_TIME_WEIGHTING = True    # farther future = lower weight (w = 1/(base+t*rate))
-USE_TIEBREAK       = True    # deterministic tiebreak to avoid death loops
-
-# ── Engine selection ───────────────────────────────────────
-# When True, uses C beam search (CHECK_EVERY=1, fast, experimental).
-# When False, uses Python numba beam (CHECK_EVERY=4, proven 72s).
-USE_C_BEAM = False  # C beam needs more debugging
-# These are informational — actual values live in c_engine.c
-# BS_DEPTH=160, BS_WIDTH=12, BS_CHECK=1, BS_MAX_B=150
-# Scoring toggles in C: search for // ── Scoring toggles ── in c_engine.c
-USE_MC_SEARCH = False   # Monte Carlo depth-first sampling
+USE_SAFETY_MARGIN = True     # extra clearance around hitbox
+USE_MC_SEARCH = False        # Monte Carlo depth-first sampling
