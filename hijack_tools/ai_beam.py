@@ -93,7 +93,7 @@ BITS = np.array(BITS, dtype=np.int32)
 _EFF_MARGIN = SAFETY_MARGIN if USE_SAFETY_MARGIN else 0.0
 
 
-@njit
+@njit(cache=True)
 def _score_pos(px, py, bullets_t):
     """
     Full danger scoring — used by Python fallback (CHECK_EVERY=4).
@@ -124,7 +124,20 @@ def _score_pos(px, py, bullets_t):
     return danger, False
 
 
-@njit
+@njit(cache=True)
+def _check_collision(px, py, bullets_t):
+    """Fast collision-only check — no danger score, just fatal yes/no."""
+    B = bullets_t.shape[0]
+    for i in range(B):
+        dx = bullets_t[i, 0] - px
+        dy = bullets_t[i, 1] - py
+        if (dx >= HIT_X1 - SAFETY_MARGIN and dx < HIT_X2 + SAFETY_MARGIN
+                and dy >= HIT_Y1 - SAFETY_MARGIN and dy < HIT_Y2 + SAFETY_MARGIN):
+            return True
+    return False
+
+
+@njit(cache=True)
 def _beam_search(px0, py0, paths):
     """
     Multi-step beam search through (x, y, t) space.
@@ -183,8 +196,9 @@ def _beam_search(px0, py0, paths):
                         if mid_x > SCR_W: mid_x = float(SCR_W)
                         if mid_y < 0.0: mid_y = 0.0
                         if mid_y > SCR_H: mid_y = float(SCR_H)
-                        _, fatal = _score_pos(mid_x, mid_y, bullets_sub)
-                        if fatal: fatal_intermediate = True; break
+                        if _check_collision(mid_x, mid_y, bullets_sub):
+                            fatal_intermediate = True
+                            break
 
                 if fatal_intermediate:
                     continue  # skip this move — killed between checkpoints
@@ -327,6 +341,37 @@ class BeamAI:
             return 0
         if px <= 0 or py <= 0:
             px, py = CTR_X, CTR_Y
+
+        # ── Short-circuit: if no bullet is within 80px and not near wall,
+        #     skip expensive beam search — just maximize distance.
+        nearest_d2 = float('inf')
+        for b in bullets:
+            d2 = (b.x - px)**2 + (b.y - py)**2
+            if d2 < nearest_d2:
+                nearest_d2 = d2
+        near_wall = (px < 40 or px > 264 or py < 40 or py > 184)
+        if nearest_d2 > 6400 and not near_wall:  # 80^2 = 6400
+            # Fast repulsion: sum force vectors, pick closest discrete move
+            fx = fy = 0.0
+            for b in bullets:
+                dx = px - b.x; dy = py - b.y
+                d2 = dx*dx + dy*dy
+                if d2 < 0.1: d2 = 0.1
+                inv_d3 = 1.0 / (d2 * d2**0.5)
+                fx += dx * inv_d3; fy += dy * inv_d3
+            best_dot = -float('inf')
+            best_idx = 0
+            for mi in range(9):
+                mdx, mdy = MOVES[mi]
+                if mdx == 0 and mdy == 0:
+                    dot = -0.1
+                else:
+                    mmag = (mdx*mdx + mdy*mdy)**0.5
+                    vmag = max(abs(fx)+abs(fy), 0.001)
+                    dot = (mdx*fx + mdy*fy) / (mmag * vmag)
+                if dot > best_dot:
+                    best_dot, best_idx = dot, mi
+            return int(BITS[best_idx])
 
         # ── C engine path (CHECK_EVERY=1, 1px steps) ──
         if USE_C_BEAM and self._c_available:

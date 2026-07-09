@@ -73,37 +73,7 @@ _lib.sim_load_bullets.argtypes = [ctypes.c_void_p, ctypes.c_int,
     ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
 _lib.sim_load_bullets.restype = None
 
-# ── Combined step + grid state (fast path for RL) ────────────
-_lib.sim_step_with_grid.argtypes = [ctypes.c_void_p, ctypes.c_int,
-                                      ctypes.POINTER(ctypes.c_float)]
-_lib.sim_step_with_grid.restype = ctypes.c_int
-
-# ── C inference engine ──────────────────────────────────────
-_lib.sim_load_weights.argtypes = [ctypes.POINTER(ctypes.c_float), ctypes.c_int]
-_lib.sim_load_weights.restype = None
-
-_lib.sim_run_episode_c.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_float]
-_lib.sim_run_episode_c.restype = ctypes.c_int
-
-# ── Batch episode callback type ─────────────────────────────
-AI_CALLBACK = ctypes.CFUNCTYPE(
-    ctypes.c_int,  # return: input bits
-    ctypes.c_int, ctypes.c_int,  # px, py
-    ctypes.c_int,  # n (bullet count)
-    ctypes.POINTER(ctypes.c_int),  # bx array
-    ctypes.POINTER(ctypes.c_int),  # by array
-    ctypes.POINTER(ctypes.c_int),  # types array
-    ctypes.POINTER(ctypes.c_int),  # angles array
-    ctypes.POINTER(ctypes.c_int),  # vx array
-    ctypes.POINTER(ctypes.c_int),  # vy array
-    ctypes.c_int,  # graze
-    ctypes.c_int,  # frame
-)
-
-_lib.sim_run_episode.argtypes = [ctypes.c_void_p, ctypes.c_int, AI_CALLBACK]
-_lib.sim_run_episode.restype = ctypes.c_int
-
-# ── C beam search (CHECK_EVERY=1, DEPTH=160, WIDTH=12) ─────
+# ── C beam search ─────────────────────────────────────────
 _lib.sim_beam_search.argtypes = [ctypes.c_void_p]
 _lib.sim_beam_search.restype = ctypes.c_int
 
@@ -234,62 +204,6 @@ class CSimulator:
         by = (ctypes.c_int * n)(*[b[1] for b in bullets])
         ai = (ctypes.c_int * n)(*[b[2] for b in bullets])
         return _lib.sim_beam_search_raw(px, py, n, bx, by, ai)
-
-    def step_with_grid(self, input_bits, grid_out):
-        """
-        One sim step + compute grid state in C (eliminates Python encode_state).
-        grid_out: numpy (4, 24, 32) float32 array, filled in-place.
-        Returns alive (bool).
-        """
-        alive = _lib.sim_step_with_grid(
-            self._ptr, input_bits,
-            grid_out.ctypes.data_as(ctypes.POINTER(ctypes.c_float)))
-        return bool(alive)
-
-    def run_episode(self, ai, max_frames=8000):
-        """
-        Run a full episode with the given AI, entirely in C loop.
-        `ai` must have a decide(px, py, bullets, **kwargs) → bits method.
-        Eliminates per-frame ctypes overhead (8000 calls → 1 call).
-        Returns frames survived.
-        """
-        @AI_CALLBACK
-        def _cb(px, py, n, bx_ptr, by_ptr, types_ptr, angles_ptr,
-                vx_ptr, vy_ptr, graze, frame):
-            bullets = []
-            for i in range(n):
-                bullets.append(Bullet(
-                    x=bx_ptr[i], y=by_ptr[i], type=types_ptr[i],
-                    angle_index=angles_ptr[i], vx=vx_ptr[i], vy=vy_ptr[i]))
-            import inspect
-            try:
-                bits = ai.decide(px, py, bullets, graze=graze, frame=frame)
-            except TypeError:
-                bits = ai.decide(px, py, bullets)
-            return bits
-
-        return _lib.sim_run_episode(self._ptr, max_frames, _cb)
-
-
-def load_weights_to_c(bin_path):
-    """Load exported .bin weights into the C inference engine."""
-    import numpy as np
-    weights = np.fromfile(bin_path, dtype=np.float32)
-    _lib.sim_load_weights(
-        weights.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-        len(weights))
-    return len(weights)
-
-
-def run_episode_c(c_sim, max_frames=8000, epsilon=0.0):
-    """
-    Run one episode with pure C inference (zero Python callbacks).
-    Requires sim_load_weights() to have been called first.
-    epsilon: exploration rate (0.0 = pure greedy, 1.0 = pure random)
-    Returns frames survived.
-    """
-    return _lib.sim_run_episode_c(c_sim._ptr, max_frames, ctypes.c_float(epsilon))
-
 
 # ── Standalone C beam search (no CSimulator instance needed) ─
 def c_beam_search(px, py, bullets):

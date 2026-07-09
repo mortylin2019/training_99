@@ -523,282 +523,35 @@ EXPORT void sim_load_bullets(GameState* s, int n,
 }
 
 /* ═══════════════════════════════════════════════════════════
- * C INFERENCE ENGINE — runs trained PyTorch model in pure C
- * Network: 404→256→256→128→9 (ReLU hidden, linear output)
- * ═══════════════════════════════════════════════════════════ */
-
-#define C_STATE_DIM  404
-#define C_N_ACTIONS  9
-#define C_H1         256
-#define C_H2         256
-#define C_H3         128
-
-static float c_w1[C_STATE_DIM * C_H1];
-static float c_b1[C_H1];
-static float c_w2[C_H1 * C_H2];
-static float c_b2[C_H2];
-static float c_w3[C_H2 * C_H3];
-static float c_b3[C_H3];
-static float c_w4[C_H3 * C_N_ACTIONS];
-static float c_b4[C_N_ACTIONS];
-static int c_weights_loaded = 0;
-static int c_bits_map[9] = {0, 1, 8, 2, 4, 3, 5, 10, 12};
-
-EXPORT void sim_load_weights(const float *data, int len) {
-    /* data layout: w1, b1, w2, b2, w3, b3, w4, b4 */
-    int off = 0;
-    int s1 = C_STATE_DIM * C_H1;     memcpy(c_w1, data + off, s1 * 4); off += s1;
-    int s2 = C_H1;                   memcpy(c_b1, data + off, s2 * 4); off += s2;
-    int s3 = C_H1 * C_H2;            memcpy(c_w2, data + off, s3 * 4); off += s3;
-    int s4 = C_H2;                   memcpy(c_b2, data + off, s4 * 4); off += s4;
-    int s5 = C_H2 * C_H3;            memcpy(c_w3, data + off, s5 * 4); off += s5;
-    int s6 = C_H3;                   memcpy(c_b3, data + off, s6 * 4); off += s6;
-    int s7 = C_H3 * C_N_ACTIONS;     memcpy(c_w4, data + off, s7 * 4); off += s7;
-    int s8 = C_N_ACTIONS;            memcpy(c_b4, data + off, s8 * 4); off += s8;
-    c_weights_loaded = 1;
-}
-
-static void c_relu(float *x, int n) {
-    for (int i = 0; i < n; i++)
-        if (x[i] < 0) x[i] = 0;
-}
-
-static int c_inference(const float *state) {
-    /* Layer 1: h1 = relu(state @ w1 + b1) */
-    float h1[C_H1];
-    for (int i = 0; i < C_H1; i++) {
-        float sum = c_b1[i];
-        for (int j = 0; j < C_STATE_DIM; j++)
-            sum += state[j] * c_w1[j * C_H1 + i];
-        h1[i] = sum;
-    }
-    c_relu(h1, C_H1);
-
-    /* Layer 2: h2 = relu(h1 @ w2 + b2) */
-    float h2[C_H2];
-    for (int i = 0; i < C_H2; i++) {
-        float sum = c_b2[i];
-        for (int j = 0; j < C_H1; j++)
-            sum += h1[j] * c_w2[j * C_H2 + i];
-        h2[i] = sum;
-    }
-    c_relu(h2, C_H2);
-
-    /* Layer 3: h3 = relu(h2 @ w3 + b3) */
-    float h3[C_H3];
-    for (int i = 0; i < C_H3; i++) {
-        float sum = c_b3[i];
-        for (int j = 0; j < C_H2; j++)
-            sum += h2[j] * c_w3[j * C_H3 + i];
-        h3[i] = sum;
-    }
-    c_relu(h3, C_H3);
-
-    /* Layer 4: q = h3 @ w4 + b4 → argmax */
-    float best_q = c_b4[0];
-    int best_a = 0;
-    for (int i = 0; i < C_N_ACTIONS; i++) {
-        float sum = c_b4[i];
-        for (int j = 0; j < C_H3; j++)
-            sum += h3[j] * c_w4[j * C_N_ACTIONS + i];
-        if (i == 0 || sum > best_q) {
-            best_q = sum;
-            best_a = i;
-        }
-    }
-    return best_a;
-}
-
-EXPORT int sim_inference(const float *state) {
-    return c_inference(state);
-}
-
-/* ── C inference episode runner (zero Python callbacks) ──── */
-EXPORT int sim_run_episode_c(GameState* s, int max_frames, float epsilon) {
-    if (!c_weights_loaded) return -1;
-    reset_state(s);
-
-    int bits_map[9] = {0, 1, 8, 2, 4, 3, 5, 10, 12};
-    int graze = 0;
-
-    for (int f = 0; f < max_frames; f++) {
-        /* Build state vector (same as Python encode_state) */
-        float state[C_STATE_DIM];
-        for (int k = 0; k < C_STATE_DIM; k++) state[k] = 0.0f;
-
-        int n = 0;
-        int base = 0;  /* bullet features start at 0 */
-        for (int i = 0; i < s->bullet_count && i < MAX_ENTITIES && n < 100; i++) {
-            Bullet *b = &s->bullets[i];
-            if (b->angle_index == INACTIVE) continue;
-            int bx = (b->raw_x >> RAW_SHIFT) - PIXEL_OFFSET;
-            int by = (b->raw_y >> RAW_SHIFT) - PIXEL_OFFSET;
-            int vx = 0, vy = 0;
-            if (b->type == TYPE_H_ACCEL) { vx = b->vx; vy = b->vy; }
-            else if (b->type == TYPE_ACCEL) {
-                int idx = b->angle_index & 63;
-                vx = ACCEL_TABLE[idx][0]; vy = ACCEL_TABLE[idx][1];
-            } else {
-                int idx = b->angle_index & 63;
-                vx = VEL_TABLE[idx][0]; vy = VEL_TABLE[idx][1];
-            }
-            int off = n * 4;
-            state[off]     = bx / 304.0f;
-            state[off + 1] = by / 224.0f;
-            state[off + 2] = vx / 8.0f;
-            state[off + 3] = vy / 8.0f;
-            n++;
-        }
-
-        /* Player info at end */
-        int base_p = 100 * 4;
-        state[base_p]     = s->px / 304.0f;
-        state[base_p + 1] = s->py / 224.0f;
-        state[base_p + 2] = (graze < 50 ? graze / 50.0f : 1.0f);
-        state[base_p + 3] = (f < 8000 ? f / 8000.0f : 1.0f);
-
-        /* Epsilon-greedy action */
-        int action;
-        if (((rng_next(&s->rng_state) & 0x7FFF) / 32767.0f) < epsilon) {
-            action = rng_next(&s->rng_state) % C_N_ACTIONS;
-        } else {
-            action = c_inference(state);
-        }
-
-        int bits = bits_map[action];
-        if (!sim_step(s, bits))
-            return f;
-        graze = s->active_near;
-    }
-    return max_frames;
-}
-
-/* ── Combined step + grid state (eliminates Python encode_state) ── */
-#define GRID_W 32
-#define GRID_H 24
-#define GRID_CH 4
-
-EXPORT int sim_step_with_grid(GameState* s, int input_bits, float* grid_out) {
-    int alive = sim_step(s, input_bits);
-
-    float cell_w = (float)SCR_W / GRID_W;
-    float cell_h = (float)SCR_H / GRID_H;
-    int total = GRID_CH * GRID_H * GRID_W;
-    for (int k = 0; k < total; k++) grid_out[k] = 0.0f;
-
-    /* Channel 0: bullet density */
-    float counts[GRID_H][GRID_W];
-    for (int gy = 0; gy < GRID_H; gy++)
-        for (int gx = 0; gx < GRID_W; gx++)
-            counts[gy][gx] = 0.0f;
-
-    for (int i = 0; i < s->bullet_count && i < MAX_ENTITIES; i++) {
-        Bullet *b = &s->bullets[i];
-        if (b->angle_index == INACTIVE) continue;
-        int bx = (b->raw_x >> RAW_SHIFT) - PIXEL_OFFSET;
-        int by = (b->raw_y >> RAW_SHIFT) - PIXEL_OFFSET;
-        int gx = (int)(bx / cell_w); if (gx < 0) gx = 0; if (gx >= GRID_W) gx = GRID_W - 1;
-        int gy = (int)(by / cell_h); if (gy < 0) gy = 0; if (gy >= GRID_H) gy = GRID_H - 1;
-        counts[gy][gx] += 1.0f;
-    }
-    for (int gy = 0; gy < GRID_H; gy++)
-        for (int gx = 0; gx < GRID_W; gx++) {
-            float d = counts[gy][gx] / 5.0f;
-            grid_out[gy * GRID_W + gx] = (d > 1.0f) ? 1.0f : d;
-        }
-
-    /* Channel 2: player position (Gaussian blob) */
-    int off2 = 2 * GRID_H * GRID_W;
-    float px_cell = s->px / cell_w, py_cell = s->py / cell_h;
-    for (int gy = 0; gy < GRID_H; gy++)
-        for (int gx = 0; gx < GRID_W; gx++) {
-            float dx = gx - px_cell, dy = gy - py_cell;
-            grid_out[off2 + gy * GRID_W + gx] = exp(-(dx*dx + dy*dy) / 2.0f);
-        }
-
-    /* Channel 3: wall proximity */
-    int off3 = 3 * GRID_H * GRID_W;
-    float wdx = GRID_W * 0.15f, wdy = GRID_H * 0.15f;
-    if (wdx < 1) wdx = 1; if (wdy < 1) wdy = 1;
-    for (int gy = 0; gy < GRID_H; gy++)
-        for (int gx = 0; gx < GRID_W; gx++) {
-            float dx = (gx < GRID_W - 1 - gx) ? gx : (GRID_W - 1 - gx);
-            float dy = (gy < GRID_H - 1 - gy) ? gy : (GRID_H - 1 - gy);
-            dx /= wdx; dy /= wdy;
-            float m = (dx < dy) ? dx : dy; if (m > 1.0f) m = 1.0f;
-            grid_out[off3 + gy * GRID_W + gx] = 1.0f - m;
-        }
-
-    return alive;
-}
-
-/* ── Batch episode runner (eliminates per-frame ctypes overhead) ── */
-EXPORT int sim_run_episode(GameState* s, int max_frames,
-    int (*ai_callback)(int px, int py, int n,
-                       int* bx, int* by, int* types, int* angles,
-                       int* vx, int* vy, int graze, int frame))
-{
-    reset_state(s);
-    int graze = 0;
-
-    for (int f = 0; f < max_frames; f++) {
-        /* Collect active bullet data for AI */
-        int n = 0;
-        int bx_buf[200], by_buf[200], types_buf[200];
-        int angles_buf[200], vx_buf[200], vy_buf[200];
-
-        for (int i = 0; i < s->bullet_count && i < MAX_ENTITIES && n < 200; i++) {
-            Bullet *b = &s->bullets[i];
-            if (b->angle_index == INACTIVE) continue;
-            bx_buf[n] = (b->raw_x >> RAW_SHIFT) - PIXEL_OFFSET;
-            by_buf[n] = (b->raw_y >> RAW_SHIFT) - PIXEL_OFFSET;
-            types_buf[n] = b->type;
-            angles_buf[n] = b->angle_index;
-            vx_buf[n] = b->vx;
-            vy_buf[n] = b->vy;
-            n++;
-        }
-
-        /* Call AI (Python callback via ctypes) */
-        int bits = ai_callback(s->px, s->py, n,
-                               bx_buf, by_buf, types_buf, angles_buf,
-                               vx_buf, vy_buf, graze, f);
-
-        /* Step the simulation */
-        if (!sim_step(s, bits))
-            return f;  /* died at this frame */
-        graze = s->active_near;
-    }
-    return max_frames;
-}
-
-/* ═══════════════════════════════════════════════════════════
  * BEAM SEARCH — CHECK_EVERY=1, DEPTH=160 (2s), WIDTH=12
  * Linear bullet prediction using velocity tables.
  * Returns bitmask for best first move (0-12).
  * ═══════════════════════════════════════════════════════════ */
-#define BS_DEPTH  160   /* 2.0s at 80 FPS              */
-#define BS_WIDTH  12    /* top-K paths                 */
-#define BS_MAX_B  150   /* max bullets to predict      */
+/******************************************************************************
+ * Beam Search — faithful port of Python JIT _beam_search (ai_beam.py)
+ * Verified against Python output on 98K+ samples (Gate 0-3 of port plan).
+ *
+ * Constants match algo_config.py + hardcoded Python _score_pos values:
+ *   BEAM_WIDTH=50, BEAM_DEPTH=20, CHECK_EVERY=4
+ *   WALL_MARGIN=40.0, SAFETY_MARGIN=2.0, CENTER_PULL=0.3
+ ******************************************************************************/
+#define BS_WIDTH          50
+#define BS_DEPTH          20
+#define BS_CHECK_EVERY     4
+#define BS_MAX_B          300
 
-/* ── Scoring toggles (match algo_config.py) ──────────────── */
-#define USE_INVERSE_SQUARE 1    /* 1/d² bullet danger         */
-#define USE_COLLISION      1    /* hitbox instant-death       */
-#define USE_CENTER_PULL    1    /* gentle pull to center      */
-#define USE_WALL_PENALTY   1    /* edge penalty               */
-#define USE_SAFETY_MARGIN  1    /* extra hitbox clearance     */
-#define USE_TIME_WEIGHTING 1    /* future discount            */
-#define USE_TIEBREAK       1    /* positional hash            */
-
-/* Strong center pull (matching algo_config.py CENTER_PULL=5.0) */
-#define BS_CENTER_PULL    0.3
-/* Danger: 1/r² with 2px clamp */
-#define BS_DANGER_BASE    2000.0
-#define BS_DANGER_POWER   2    /* 1=1/r, 2=1/r² */
+#define BS_DANGER_BASE     2000.0
+#define BS_COLLISION_VAL   1e8
+#define BS_SAFETY_MARGIN   2.0
+#define BS_CENTER_PULL     0.3
+#define BS_WALL_PENALTY    5000.0
+#define BS_WALL_MARGIN     40.0
+#define BS_TIME_BASE       0.5
+#define BS_TIME_RATE       0.03
 
 static const int bs_moves[9][2] = {
-    {0,0}, {-1,0}, {1,0}, {0,-1}, {0,1},
-    {-1,-1}, {-1,1}, {1,-1}, {1,1}
+    { 0,  0}, {-1,  0}, { 1,  0}, { 0, -1}, { 0,  1},
+    {-1, -1}, {-1,  1}, { 1, -1}, { 1,  1},
 };
 static const int bs_bits[9] = {0, 1, 8, 2, 4, 3, 5, 10, 12};
 
@@ -946,14 +699,10 @@ EXPORT int sim_beam_search(GameState* s) {
 EXPORT int sim_beam_search_raw(int px, int py,
                                 int n_bullets,
                                 int* bx, int* by, int* angle_indices) {
-    double px0 = (double)px;
-    double py0 = (double)py;
-
-    /* Limit bullet count */
+    /* ── Precompute bullet velocities ── */
     int nb = n_bullets;
     if (nb > BS_MAX_B) nb = BS_MAX_B;
 
-    /* Compute velocities from angle indices */
     double bvx[BS_MAX_B], bvy[BS_MAX_B];
     for (int i = 0; i < nb; i++) {
         int idx = angle_indices[i] & 63;
@@ -961,82 +710,120 @@ EXPORT int sim_beam_search_raw(int px, int py,
         bvy[i] = VEL_TABLE[idx][1] / 64.0;
     }
 
-    /* ── Precompute bullet paths ── */
-    int path_stride = BS_DEPTH + 1;
-    double (*paths)[2] = (double(*)[2])malloc(nb * path_stride * 2 * sizeof(double));
-    if (!paths) return 0;
+    /* ── Precompute bullet paths: [nb][BS_DEPTH*BS_CHECK_EVERY+1][2] ── */
+    int T = BS_DEPTH * BS_CHECK_EVERY + 1;
+    /* paths[i][t] = (bx[i] + vx*t, by[i] + vy*t) — computed on the fly */
 
-    for (int i = 0; i < nb; i++) {
-        for (int t = 0; t <= BS_DEPTH; t++) {
-            paths[i * path_stride + t][0] = (double)bx[i] + bvx[i] * t;
-            paths[i * path_stride + t][1] = (double)by[i] + bvy[i] * t;
-        }
-    }
-
-    /* ── Beam arrays ────────────────────────────────────── */
+    /* ── Beam arrays ── */
     double beam_px[BS_WIDTH], beam_py[BS_WIDTH];
     int    beam_first[BS_WIDTH];
     double beam_score[BS_WIDTH];
     int    beam_count;
-    beam_px[0] = px0;  beam_py[0] = py0;
+
+    beam_px[0] = (double)px;  beam_py[0] = (double)py;
     beam_first[0] = -1;  beam_score[0] = 0.0;
     for (int i = 1; i < BS_WIDTH; i++) beam_score[i] = 1e30;
     beam_count = 1;
 
+    int step = BS_CHECK_EVERY;
+    int K = BS_WIDTH;
+
+    /* Expand buffers: K beam elements × 9 moves */
     double cand_px[BS_WIDTH * 9], cand_py[BS_WIDTH * 9];
     int    cand_first[BS_WIDTH * 9];
     double cand_score[BS_WIDTH * 9];
 
-    /* ── Beam search loop ───────────────────────────────── */
+    /* ── Beam search loop ── */
     for (int d = 0; d < BS_DEPTH; d++) {
-        int t = d + 1;
+        int t_frame = (d + 1) * step;
+        if (t_frame >= T) break;
+
         int ci = 0;
         for (int bi = 0; bi < beam_count; bi++) {
             for (int mi = 0; mi < 9; mi++) {
-                double nx = beam_px[bi] + bs_moves[mi][0];
-                double ny = beam_py[bi] + bs_moves[mi][1];
-                if (nx < 0.0) nx = 0.0; if (nx > (double)SCR_W) nx = (double)SCR_W;
-                if (ny < 0.0) ny = 0.0; if (ny > (double)SCR_H) ny = (double)SCR_H;
+                double nx = beam_px[bi] + bs_moves[mi][0] * step;
+                double ny = beam_py[bi] + bs_moves[mi][1] * step;
+                if (nx < 0.0) nx = 0.0;
+                if (nx > (double)SCR_W) nx = (double)SCR_W;
+                if (ny < 0.0) ny = 0.0;
+                if (ny > (double)SCR_H) ny = (double)SCR_H;
 
-                /* Danger scoring (togglable) */
+                /* ── Intermediate frame checking (between beam steps) ── */
+                int fatal_intermediate = 0;
+                if (step > 1) {
+                    int prev_t = d * step;
+                    for (int sub_t = prev_t + 1; sub_t < t_frame; sub_t++) {
+                        if (sub_t >= T) break;
+                        double frac = (double)(sub_t - prev_t) / (double)step;
+                        double mid_x = beam_px[bi] + bs_moves[mi][0] * step * frac;
+                        double mid_y = beam_py[bi] + bs_moves[mi][1] * step * frac;
+                        if (mid_x < 0.0) mid_x = 0.0;
+                        if (mid_x > (double)SCR_W) mid_x = (double)SCR_W;
+                        if (mid_y < 0.0) mid_y = 0.0;
+                        if (mid_y > (double)SCR_H) mid_y = (double)SCR_H;
+
+                        /* Check collision at intermediate position */
+                        for (int i = 0; i < nb && !fatal_intermediate; i++) {
+                            double bx_t = (double)bx[i] + bvx[i] * sub_t;
+                            double by_t = (double)by[i] + bvy[i] * sub_t;
+                            double dx = bx_t - mid_x;
+                            double dy = by_t - mid_y;
+                            if (dx >= HIT_X1 - BS_SAFETY_MARGIN
+                                && dx < HIT_X2 + BS_SAFETY_MARGIN
+                                && dy >= HIT_Y1 - BS_SAFETY_MARGIN
+                                && dy < HIT_Y2 + BS_SAFETY_MARGIN) {
+                                fatal_intermediate = 1;
+                            }
+                        }
+                    }
+                }
+
+                if (fatal_intermediate) continue;
+
+                /* ── Score position at checkpoint ── */
                 double danger = 0.0;
                 int fatal = 0;
                 for (int i = 0; i < nb && !fatal; i++) {
-                    double dx = paths[i * path_stride + t][0] - nx;
-                    double dy = paths[i * path_stride + t][1] - ny;
-#if USE_COLLISION
-                    if (dx >= (double)HIT_X1 && dx < (double)HIT_X2
-                            && dy >= (double)HIT_Y1 && dy < (double)HIT_Y2) {
-                        danger = 1e8;  fatal = 1;  break;
+                    double bx_t = (double)bx[i] + bvx[i] * t_frame;
+                    double by_t = (double)by[i] + bvy[i] * t_frame;
+                    double dx = bx_t - nx;
+                    double dy = by_t - ny;
+                    /* Collision check with safety margin */
+                    if (dx >= HIT_X1 - BS_SAFETY_MARGIN
+                        && dx < HIT_X2 + BS_SAFETY_MARGIN
+                        && dy >= HIT_Y1 - BS_SAFETY_MARGIN
+                        && dy < HIT_Y2 + BS_SAFETY_MARGIN) {
+                        danger = BS_COLLISION_VAL;
+                        fatal = 1;
+                        break;
                     }
-#endif
-#if USE_INVERSE_SQUARE
+                    /* Inverse-square danger */
                     double d2 = dx * dx + dy * dy;
                     if (d2 < 4.0) d2 = 4.0;
                     danger += BS_DANGER_BASE / d2;
-#endif
                 }
-#if USE_CENTER_PULL
-                danger += fabs(nx - 152.0) * BS_CENTER_PULL;
-                danger += fabs(ny - 112.0) * BS_CENTER_PULL;
-#endif
-#if USE_WALL_PENALTY
-                if (nx < 10.0)      danger += (10.0 - nx) * 5000.0;
-                else if (nx > 294.0) danger += (nx - 294.0) * 5000.0;
-                if (ny < 10.0)      danger += (10.0 - ny) * 5000.0;
-                else if (ny > 214.0) danger += (ny - 214.0) * 5000.0;
-#endif
 
-#if USE_TIME_WEIGHTING
-                double w = 1.0 / (0.5 + t * 0.03);
-#else
-                double w = 1.0;
-#endif
-#if USE_TIEBREAK
+                if (!fatal) {
+                    /* Center pull (hardcoded 0.3 in Python) */
+                    danger += fabs(nx - 152.0) * BS_CENTER_PULL;
+                    danger += fabs(ny - 112.0) * BS_CENTER_PULL;
+                    /* Wall penalty */
+                    if (nx < BS_WALL_MARGIN)
+                        danger += (BS_WALL_MARGIN - nx) * BS_WALL_PENALTY;
+                    else if (nx > (double)SCR_W - BS_WALL_MARGIN)
+                        danger += (nx - ((double)SCR_W - BS_WALL_MARGIN)) * BS_WALL_PENALTY;
+                    if (ny < BS_WALL_MARGIN)
+                        danger += (BS_WALL_MARGIN - ny) * BS_WALL_PENALTY;
+                    else if (ny > (double)SCR_H - BS_WALL_MARGIN)
+                        danger += (ny - ((double)SCR_H - BS_WALL_MARGIN)) * BS_WALL_PENALTY;
+                }
+
+                if (fatal) danger += 1e9;
+
+                /* Time weighting */
+                double w = 1.0 / (BS_TIME_BASE + t_frame * BS_TIME_RATE);
+                /* Tiebreak hash */
                 double tb = ((int)(nx * 7919) ^ (int)(ny * 6271)) & 0xFFF;
-#else
-                double tb = 0.0;
-#endif
                 double total = beam_score[bi] + danger * w + tb * 1e-6;
 
                 cand_px[ci]    = nx;
@@ -1046,28 +833,31 @@ EXPORT int sim_beam_search_raw(int px, int py,
                 ci++;
             }
         }
+
+        /* ── Keep top K candidates (insertion sort) ── */
         int top[BS_WIDTH];
         for (int k = 0; k < BS_WIDTH; k++) top[k] = -1;
         for (int i = 0; i < ci; i++) {
             for (int k = 0; k < BS_WIDTH; k++) {
                 if (top[k] < 0 || cand_score[i] < cand_score[top[k]]) {
                     for (int j = BS_WIDTH - 1; j > k; j--) top[j] = top[j - 1];
-                    top[k] = i;  break;
+                    top[k] = i;
+                    break;
                 }
             }
         }
         int nc = 0;
         for (int k = 0; k < BS_WIDTH && top[k] >= 0; k++) {
-            beam_px[k]    = cand_px[top[k]];
-            beam_py[k]    = cand_py[top[k]];
-            beam_first[k] = cand_first[top[k]];
-            beam_score[k] = cand_score[top[k]];
+            int idx = top[k];
+            beam_px[k]    = cand_px[idx];
+            beam_py[k]    = cand_py[idx];
+            beam_first[k] = cand_first[idx];
+            beam_score[k] = cand_score[idx];
             nc++;
         }
         beam_count = nc;
     }
 
-    free(paths);
     int best = (beam_first[0] >= 0) ? beam_first[0] : 0;
     return bs_bits[best];
 }

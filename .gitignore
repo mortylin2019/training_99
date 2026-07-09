@@ -219,3 +219,5 @@ training_data/
 # Video recordings (large binary files)
 logs/videos/
 
+tests/beam_truth.npz
+hijack_tools/simulator/sim_core.so
