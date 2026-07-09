@@ -13,9 +13,9 @@ hijack_tools/
 ├── game_control.py      # Process I/O: launch, memory r/w, game state (521 loc)
 ├── runner.py            # Main AI runner entry point
 ├── multi_runner.py      # Parallel multi-instance runner
-├── ai_direct.py         # AI: Two-Pass Time-Space Danger Grid (top-tier)
+├── ai_basic.py          # AI: 1/r² repulsion baseline
 ├── ai_beam.py           # AI: JIT Beam Search with C DLL fallback
-├── ai_rl.py             # AI: RL agent (PyTorch)
+├── ai_nn.py             # AI: NN-boosted beam search + MCTS variants
 ├── bullet_data.py       # Bullet @dataclass (shared data model)
 ├── keyboard.py          # Direction bitmask → name mapping
 ├── algo_config.py       # Beam search config constants
@@ -35,12 +35,12 @@ hijack_tools/
 | Task | Location | Notes |
 |------|----------|-------|
 | **Add new AI** | Create new file, import in `runner.py` | Pattern: `class MyAI: decide(px, py, bullets) → bitmask` |
-| **Change AI algorithm** | `ai_direct.py` (150 loc) or `ai_beam.py` (253 loc) | Pure functions — no I/O, no process access |
+| **Change AI algorithm** | `ai_beam.py` (406 loc) or `ai_nn.py` (390 loc) | Pure functions — no I/O, no process access |
 | **Fix memory access** | `game_control.py` | ONLY module touching live process memory |
 | **Change beam search params** | `algo_config.py` | Depth, width, scoring weights, toggles |
 | **Debug AI decisions** | `profile_ai.py` | cProfile with fake bullets |
 | **Add new bullet type** | `bullet_data.py` | Shared @dataclass |
-| **Run AI** | `runner.py --ai ai_direct --runs 10` | Real game required |
+| **Run AI** | `runner.py --ai ai_beam --runs 10` | Real game required |
 | **Benchmark offline** | `simulator/runner.py --ai ai_beam --runs 500` | No game needed |
 
 ## CONVENTIONS

@@ -2,8 +2,8 @@
 profile_ai.py — Profile AI algorithm performance.
 
 Usage:
-    python hijack_tools/profile_ai.py                  # profile ai_direct
-    python hijack_tools/profile_ai.py --ai ai_beam      # profile another algo
+    python hijack_tools/profile_ai.py                  # profile ai_beam
+    python hijack_tools/profile_ai.py --ai ai_nn        # profile another algo
     python hijack_tools/profile_ai.py --frames 10000    # simulate N frames
     python hijack_tools/profile_ai.py --bullets 50      # bullet count
 """
@@ -45,9 +45,6 @@ class FakeBullet:
 
 
 def load_ai(name):
-    if name == "ai_direct":
-        from ai_direct import SuperiorAI
-        return SuperiorAI
     if name == "ai_beam":
         from ai_beam import BeamAI
         return BeamAI
@@ -134,7 +131,7 @@ def profile_cpu(ai_name, frames=500, bullets_n=50):
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser(description="Profile AI performance")
-    p.add_argument("--ai", default="ai_direct", help="AI module name")
+    p.add_argument("--ai", default="ai_beam", help="AI module name")
     p.add_argument("--frames", type=int, default=5000, help="Frames to simulate")
     p.add_argument("--bullets", type=int, default=50, help="Bullet count")
     p.add_argument("--cpu", action="store_true", help="Also run cProfile")

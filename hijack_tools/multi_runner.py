@@ -46,9 +46,6 @@ def load_ai(name):
     if name == "ai_beam":
         from ai_beam import BeamAI
         return BeamAI
-    if name == "ai_direct":
-        from ai_direct import SuperiorAI
-        return SuperiorAI
     raise ValueError(f"Unknown AI: {name}")
 
 

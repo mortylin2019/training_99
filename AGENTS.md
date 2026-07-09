@@ -136,12 +136,9 @@ All AI bots follow this pattern:
 ### AI Versions (increasing sophistication)
 | File | Approach | Notes |
 |---|---|---|
-| `ai_basic.py` | Safety Map / Danger Field | Inverse-square danger scoring, 9-move evaluation, center bias |
-| `ai_1.py` | Vector Repulsion | Sum of normalized repulsion vectors, home pull to center |
-| `ai_2.py` | Grid Danger Scoring | 5px grid, prediction of bullet positions, center-pull gravity |
-| `ai_3.py` | Oracle / Two-Stage Lookahead | 60-frame simulation, 81-path branching, exact hitbox check |
-| `ai_4.py` | Time-Space A\* | 2x2px grid, 160-frame lookahead, vectorized numpy prediction |
-| **`ai_direct.py`** | **Time-Space Danger Grid + Full State** | **Uses ALL decompiled data: velocity tables from memory, pattern info, spawn timing, graze counters, multi-frame lookahead with exact hitbox. Bitmask hijack control.** |
+| `ai_basic.py` | 1/r² Repulsion Field | Pure reactive force field, no lookahead |
+| `ai_beam.py` | Time-Space Beam Search | 80-frame lookahead, width-50 beam, JIT-compiled |
+| `ai_nn.py` | NN-Boosted Beam Search | DeepSet attention NN guides beam escape-path selection |
 
 ### Control Mechanism (IMPORTANT)
 
@@ -155,7 +152,7 @@ There are three ways to control the player, from worst to best:
 
 ### Key Dependencies
 - `pywin32` / `ctypes` for Windows process memory access
-- `numpy` for vectorized bullet prediction (ai_4, ai_direct)
+- `numpy` for vectorized bullet prediction
 - `loguru` for structured logging
 
 ---
@@ -181,7 +178,8 @@ There are three ways to control the player, from worst to best:
 | Symbol | Type | Location | Role |
 |--------|------|----------|------|
 | `GameControl` | class | `hijack_tools/game_control.py` | Process I/O: launch `99.exe`, ReadProcessMemory/WriteProcessMemory, game state access. Foundation for ALL live-game operations. |
-| `SuperiorAI` | class | `hijack_tools/ai_direct.py` | Top-tier AI: Two-Pass Time-Space Danger Grid. Pure function (state → bitmask). No I/O. |
+| `BeamAI` | class | `hijack_tools/ai_beam.py` | Beam search AI with JIT-compiled danger prediction. Uses `algo_config.py`. Optional C DLL fallback. |
+| `NNBoostedBeamAI` | class | `hijack_tools/ai_nn.py` | NN-guided beam search. DeepSet attention model prevents early escape-path pruning. |
 | `BeamAI` | class | `hijack_tools/ai_beam.py` | Beam search AI with JIT-compiled danger prediction. Uses `algo_config.py`. Optional C DLL fallback. |
 | `Bullet` | dataclass | `hijack_tools/bullet_data.py` | Bullet entity data model. Raw coords, pixel conversion, type enum. Shared by game_control + all AIs. |
 | `GameSimulator` | class | `hijack_tools/simulator/engine.py` | Faithful 99.exe replica. Orchestrates bullet/physics/RNG/patterns. No live game needed. |
@@ -199,9 +197,9 @@ There are three ways to control the player, from worst to best:
 
 | Task | Location | Notes |
 |------|----------|-------|
-| **Fix AI survival logic** | `hijack_tools/ai_direct.py` (150 loc) or `ai_beam.py` (253 loc) | Pure functions: state in → bitmask out. No I/O. |
+| **Fix AI survival logic** | `hijack_tools/ai_beam.py` (406 loc) or `ai_nn.py` (390 loc) | Pure functions: state in → bitmask out. No I/O. |
 | **Change game constants** | `hijack_tools/simulator/config.py` + `config.yaml` | Change BOTH (they're duplicated). Also verify against decompiled C. |
-| **Add new AI algorithm** | Create new file in `hijack_tools/`, import in `runner.py` | Follow `ai_direct.py` pattern: class with `decide(px, py, bullets) → direction`. |
+| **Add new AI algorithm** | Create new file in `hijack_tools/`, import in `runner.py` | Follow `ai_basic.py` pattern: class with `decide(px, py, bullets) → direction`. |
 | **Verify Python matches real game** | `tests/test_cross_validate.py` | Launches 99.exe, writes memory, steps 1 frame, compares. Windows only. |
 | **Run tests without game binary** | `tests/test_functions.py` + `test_integration.py` | Pure Python, no 99.exe needed. |
 | **Understand game mechanics** | `doc/game_logic.md` | Authoritative human-readable spec. |
@@ -224,7 +222,7 @@ python tests/test_cross_validate.py   # Python vs real binary
 python tests/test_oracle.py           # Live game oracle
 
 # Run AI (real game, Windows only)
-python hijack_tools/runner.py --ai ai_direct --runs 10
+python hijack_tools/runner.py --ai ai_beam --runs 10
 python hijack_tools/multi_runner.py -n 4 --ai ai_beam
 
 # Run AI (simulated, no binary needed)

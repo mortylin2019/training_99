@@ -302,7 +302,82 @@ class NNFallbackAI(BeamAI):
         return beam_bits
 
 
-# ── Self-test ──────────────────────────────────────────────────────────────────
+# ── Smoothed Beam Search (jitter prevention) ──────────────────────────────────
+
+class SmoothBeamAI(BeamAI):
+    """Beam search with EMA-smoothed output to eliminate micro-oscillation.
+
+    Frame-by-frame decisions have no memory, causing UP→DOWN→UP jitter when
+    the "safest pixel" oscillates between two positions. This wrapper applies
+    exponential moving average to the chosen direction, creating natural inertia.
+
+    Panic bypass: if any bullet is within DANGER_RADIUS pixels, smoothing is
+    disabled and the raw beam output is used directly — zero latency for dodging.
+
+    Smoothing: 70% old momentum, 30% new direction per frame.
+    """
+
+    DANGER_RADIUS = 25  # px — bullets closer than this bypass smoothing
+    SMOOTH = 0.3        # new direction weight (lower = more inertia)
+
+    def __init__(self, vel_table=None, accel_table=None):
+        super().__init__(vel_table=vel_table, accel_table=accel_table)
+        self._vx = 0.0
+        self._vy = 0.0
+
+    def decide(self, px, py, bullets):
+        if not bullets:
+            self._vx = self._vy = 0.0
+            return 0
+
+        # Get raw beam decision
+        raw_bits = super().decide(px, py, bullets)
+
+        # Check for immediate threats — if any bullet is close, skip smoothing
+        panic = False
+        for b in bullets:
+            if abs(b.x - px) < self.DANGER_RADIUS and abs(b.y - py) < self.DANGER_RADIUS:
+                panic = True
+                break
+
+        # Map bits to (dx, dy)
+        idx = _bits_to_idx(raw_bits)
+        dx = MOVES[idx][0]
+        dy = MOVES[idx][1]
+
+        if panic:
+            # Direct response — reset momentum to new direction
+            self._vx = float(dx)
+            self._vy = float(dy)
+            return raw_bits
+
+        # EMA smooth
+        self._vx = (1.0 - self.SMOOTH) * self._vx + self.SMOOTH * dx
+        self._vy = (1.0 - self.SMOOTH) * self._vy + self.SMOOTH * dy
+
+        # Snap smoothed velocity to nearest discrete move
+        if abs(self._vx) < 0.2 and abs(self._vy) < 0.2:
+            return 0  # STOP
+
+        best_dot, best_bits = -float('inf'), 0
+        vmag = max(abs(self._vx) + abs(self._vy), 0.001)
+        for mi, (mdx, mdy) in enumerate(MOVES):
+            if mdx == 0 and mdy == 0:
+                dot = -0.1
+            else:
+                mmag = (mdx * mdx + mdy * mdy) ** 0.5
+                dot = (mdx * self._vx + mdy * self._vy) / (mmag * vmag)
+            if dot > best_dot:
+                best_dot, best_bits = dot, BITS[mi]
+
+        return best_bits
+
+
+def _bits_to_idx(bits):
+    for i, b in enumerate(BITS):
+        if b == bits:
+            return i
+    return 0
 
 if __name__ == "__main__":
     # Quick smoke test with simulated bullets

@@ -42,9 +42,6 @@ def load_ai(name):
     if name == "ai_beam":
         from ai_beam import BeamAI
         return BeamAI
-    if name == "ai_direct":
-        from ai_direct import SuperiorAI
-        return SuperiorAI
     if name == "ai_nn":
         from ai_nn import NNBoostedBeamAI
         return NNBoostedBeamAI
@@ -54,10 +51,13 @@ def load_ai(name):
     if name == "ai_numba":
         from ai_beam import BeamAI
         return BeamAI  # legacy alias
-    raise ValueError(f"Unknown AI: {name}. Choices: ai_basic, ai_beam, ai_direct, ai_nn, ai_nn_greedy")
+    if name == "ai_smooth":
+        from ai_nn import SmoothBeamAI
+        return SmoothBeamAI
+    raise ValueError(f"Unknown AI: {name}. Choices: ai_basic, ai_beam, ai_nn, ai_nn_greedy, ai_smooth")
 
 
-def run(ai_name="ai_direct", max_runs=10, video=False, ui=False, embed=False):
+def run(ai_name="ai_beam", max_runs=10, video=False, ui=False, embed=False):
     game = GameControl()
     if not game.launch_game():
         logger.error("Failed to launch game")
@@ -438,7 +438,7 @@ def save_history(history, ai_name):
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser(description="AI Runner for Training 99")
-    p.add_argument("--ai", default="ai_direct", help="AI algorithm module")
+    p.add_argument("--ai", default="ai_beam", help="AI algorithm module")
     p.add_argument("--runs", type=int, default=10,
                    help="Number of runs (0=infinite)")
     p.add_argument("--video", action="store_true",

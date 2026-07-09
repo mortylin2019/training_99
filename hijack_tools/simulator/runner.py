@@ -36,7 +36,11 @@ def _load_ai(name):
         try: from ai_nn import NNGreedyAI
         except ImportError: from hijack_tools.ai_nn import NNGreedyAI
         return NNGreedyAI
-    raise ValueError(f"Unknown AI: {name}. Choices: ai_beam, ai_basic, ai_nn, ai_nn_greedy")
+    if name == "ai_smooth":
+        try: from ai_nn import SmoothBeamAI
+        except ImportError: from hijack_tools.ai_nn import SmoothBeamAI
+        return SmoothBeamAI
+    raise ValueError(f"Unknown AI: {name}. Choices: ai_beam, ai_basic, ai_nn, ai_nn_greedy, ai_smooth")
 
 
 def _run_one(args):
