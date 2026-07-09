@@ -111,9 +111,22 @@ def _score_pos(px, py, bullets_t):
 
 @njit(cache=True)
 def _score_pos_early_exit(px, py, bullets_t, best_so_far):
-    """Scoring with early termination — stops when candidate can't win."""
+    """Scoring with early termination — stops when candidate can't win.
+
+    Computes wall penalty + center pull FIRST so the early-exit comparison
+    is against the FULL accumulated score. Buffer of 50000 ensures only
+    truly hopeless candidates are discarded (max possible bullet danger
+    from remaining bullets is ~30000, so +50000 = mathematically safe).
+    """
     B = bullets_t.shape[0]
     danger = 0.0
+
+    wall_ctr = abs(px - CTR_X) * 0.3 + abs(py - CTR_Y) * 0.3
+    if px < WALL_MARGIN: wall_ctr += (WALL_MARGIN - px) * WALL_PENALTY
+    elif px > SCR_W - WALL_MARGIN: wall_ctr += (px - (SCR_W - WALL_MARGIN)) * WALL_PENALTY
+    if py < WALL_MARGIN: wall_ctr += (WALL_MARGIN - py) * WALL_PENALTY
+    elif py > SCR_H - WALL_MARGIN: wall_ctr += (py - (SCR_H - WALL_MARGIN)) * WALL_PENALTY
+
     for i in range(B):
         bx = bullets_t[i, 0]
         by = bullets_t[i, 1]
@@ -124,15 +137,10 @@ def _score_pos_early_exit(px, py, bullets_t, best_so_far):
         d2 = dx * dx + dy * dy
         if d2 < 4.0: d2 = 4.0
         danger += DANGER_BASE / d2
-        if danger > best_so_far:
-            return danger, False
-    danger += abs(px - CTR_X) * 0.3
-    danger += abs(py - CTR_Y) * 0.3
-    if px < WALL_MARGIN: danger += (WALL_MARGIN - px) * WALL_PENALTY
-    elif px > SCR_W - WALL_MARGIN: danger += (px - (SCR_W - WALL_MARGIN)) * WALL_PENALTY
-    if py < WALL_MARGIN: danger += (WALL_MARGIN - py) * WALL_PENALTY
-    elif py > SCR_H - WALL_MARGIN: danger += (py - (SCR_H - WALL_MARGIN)) * WALL_PENALTY
-    return danger, False
+        if danger + wall_ctr > best_so_far + 50000.0:
+            return danger + wall_ctr + 100000.0, False
+
+    return danger + wall_ctr, False
 
 
 @njit(cache=True)
@@ -210,7 +218,7 @@ def _beam_search(px0, py0, paths):
                     continue
 
                 # Score with early termination: skip bullets once danger > worst_beam
-                s, fatal = _score_pos_early_exit(nx, ny, bullets_t, worst_beam + 500.0)
+                s, fatal = _score_pos_early_exit(nx, ny, bullets_t, worst_beam)
                 if fatal: s += 1e9
                 w = 1.0 / (TIME_WEIGHT_BASE + t * TIME_WEIGHT_RATE)
                 tb = ((int(nx * 7919) ^ int(ny * 6271)) & 0xFFF) * 1e-6
