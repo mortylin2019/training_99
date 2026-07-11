@@ -90,8 +90,8 @@ NUM_ANGLES = 64
 OCTANT_SEARCH = 7             # C: do { ... } while (iVar2 < 7)
 
 
-# ── Frame rate (for ms→frame conversion) ────────────────────
-FPS = 80
+# ── Frame rate (verified from assembly: G_ScoreMultiplier=16 → 1000/16=62.5fps) ──
+FPS = 62
 
 # Derived timing (frames at current FPS)
 SPAWN_INTERVAL = int(SPAWN_INTERVAL_MS * FPS / 1000)    # 240f
