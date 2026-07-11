@@ -16,8 +16,8 @@ The game runs on a Win32 message loop (`FUN_004042f0`) but relies heavily on `Pe
 - 3 = Lunatic (200 bullets)
 
 **Score Mode** (`G_ScoreType` at `0x00406dc8`):
-- 0 = Standard (multiplier 16, ~80 FPS)
-- 1 = "なんとなく80フレーム/秒" (multiplier 12, ~80 FPS)
+- 0 = Standard (multiplier 16, ~62.5 FPS)
+- 1 = "なんとなく80フレーム/秒" (multiplier 12, ~83 FPS)
 - 2 = "勢い余って全速力" (multiplier 0, unlocked FPS, raw ms scoring)
 
 ## 3. Ending & Ranking Logic (`FUN_00404050`)

@@ -99,7 +99,7 @@ Runs beam search TWICE per frame: once normally, once with the NN's preferred es
 
 ## Key Technical Details
 
-- **Game**: 32-bit Windows, ~80 FPS, 304×224 playfield
+- **Game**: 32-bit Windows, ~62.5 FPS (Standard), 304×224 playfield
 - **Player hitbox**: 11×10 px (asymmetric: 2-12 X, 0-9 Y offset)
 - **Movement**: 1 px/frame, diagonals not normalized
 - **Bullets**: 300-entity array at `0x00406e10`, 15 bytes each, 4 types (normal/homing/bounce/accelerating)

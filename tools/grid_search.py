@@ -112,7 +112,8 @@ def _run_combo(args):
             break
     elapsed = time.perf_counter() - t0
 
-    survival = sim.frame / 80.0  # 80 FPS
+    from hijack_tools.simulator.config import FPS as SIM_FPS
+    survival = sim.frame / SIM_FPS
 
     return {
         'survival': survival,
@@ -303,7 +304,7 @@ def main():
     p.add_argument('--ai', default='ai_beam', help='AI algorithm name')
     p.add_argument('--seeds', type=int, default=10, help='Seeds per parameter combo')
     p.add_argument('--difficulty', type=int, default=1, help='1=Normal, 2=Hard')
-    p.add_argument('--max-frames', type=int, default=16000, help='Max frames (200s at 80fps)')
+    p.add_argument('--max-frames', type=int, default=16000, help='Max frames (~258s at 62fps)')
     p.add_argument('--workers', type=int, default=os.cpu_count() or 4)
     p.add_argument('--quick', action='store_true', help='Use smaller grid for fast scan')
     p.add_argument('--output', default='grid_results', help='Output directory for plots')
@@ -313,7 +314,7 @@ def main():
     total_combos = 1
     for v in grid.values():
         total_combos *= len(v)
-    est_time = total_combos * args.seeds * (args.max_frames / 80.0 / 4)  # rough estimate
+    est_time = total_combos * args.seeds * (args.max_frames / 62.0 / 4)  # rough estimate
     print(f"Parameters: {list(grid.keys())}")
     print(f"Combos: {total_combos} × {args.seeds} seeds = {total_combos * args.seeds} runs")
     print(f"Est. time: ~{est_time/60:.0f} min ({args.workers} workers)")

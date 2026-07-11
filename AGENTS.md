@@ -120,7 +120,7 @@ This is a **reverse engineering project** for **特訓９９ (Training 99)**, a 
 From `Stage2_GameEntityLoop.c`: Hit if `2 <= (bullet_x - player_x) < 13 AND 0 <= (bullet_y - player_y) < 10`.
 
 ### Frame Rate
-Target ~80 FPS. Movement is **1 px/frame** in each direction (diagonals = 1px both axes, NOT normalized).
+~62.5 FPS (Standard, ScoreMultiplier=16). Movement is **1 px/frame** in each direction (diagonals = 1px both axes, NOT normalized).
 
 ---
 
