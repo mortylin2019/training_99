@@ -1,32 +1,29 @@
 """
-ai_astar.py — BFS Space-Time search with safety margin.
+ai_astar.py — Grid-Beam Search: beam search on JIT danger grid.
 
-JIT danger grids + BFS layer-by-layer exploration through time.
-No priority queue, no heuristic — explores ALL reachable cells
-at each depth step, picks the path ending at lowest danger.
+Key insight: BFS explored ALL ~3000 cells/depth. Beam search explores
+only K cells. Do beam search ON the grid — JIT danger lookup + top-K pruning.
 
-Safety margin: cells with danger > THRESHOLD are blocked.
-Center pull: targets cells near screen center at max depth.
+Combines: JIT grid speed (0.1ms) + beam pruning (450 candidates/depth).
 """
 import numpy as np
-from collections import deque
+from numba import njit
 
 try:
     from algo_config import MOVES, BITS, SCR_W, SCR_H, SPEED
 except ImportError:
     from hijack_tools.algo_config import MOVES, BITS, SCR_W, SCR_H, SPEED
 
-CELL = 4; GX = SCR_W // CELL; GY = SCR_H // CELL
-DEPTH = 16; STEP = 4; DANGER_BASE = 2000.0
-BLOCK_THRESHOLD = 5000.0  # cells above this = blocked (safety margin)
+CELL = 3; GX = SCR_W // CELL; GY = SCR_H // CELL  # 101×74 grid
+DEPTH = 20; STEP = 4; DANGER_BASE = 2000.0
+BEAM_K = 30  # top-K cells per depth (was 50 in pixel beam)
 
 MOVE_DX = np.zeros(9, dtype=np.int32); MOVE_DY = np.zeros(9, dtype=np.int32)
 for mi in range(9):
     dx = MOVES[mi][0] * SPEED * STEP; dy = MOVES[mi][1] * SPEED * STEP
-    MOVE_DX[mi] = int(dx // CELL) if dx >= 0 else -int((-dx) // CELL + 0.99)
-    MOVE_DY[mi] = int(dy // CELL) if dy >= 0 else -int((-dy) // CELL + 0.99)
-
-from numba import njit
+    MOVE_DX[mi] = int(dx / CELL) if dx >= 0 else -int((-dx) / CELL + 0.99)
+    MOVE_DY[mi] = int(dy / CELL) if dy >= 0 else -int((-dy) / CELL + 0.99)
+BITS_ARR = np.array(BITS, dtype=np.int32)
 
 @njit
 def build_grid(pred_x, pred_y, gx, gy, cell):
@@ -44,79 +41,68 @@ def build_grid(pred_x, pred_y, gx, gy, cell):
                 grid[ny, nx] += DANGER_BASE / d2
     return grid
 
-
-def bfs_search(grids, sx, sy, gx, gy, max_d):
-    """BFS through space-time grid. Returns (found, first_move_idx).
+@njit
+def beam_on_grid(grids, sx, sy, gx, gy, max_d, K):
+    """Beam search on precomputed danger grids.
     
-    Explores all reachable cells layer by layer. Each cell stores
-    parent info for path reconstruction. At max depth, picks the
-    cell with lowest danger (preferring center).
+    Like pixel beam search but uses grid cells instead of continuous positions.
+    Keeps top-K cells per depth by cumulative danger.
+    Returns best first-move index.
     """
-    # visited[depth][y][x] = (from_cx, from_cy, from_depth, move_idx)
-    visited = [[[None for _ in range(gx)] for _ in range(gy)] for _ in range(max_d + 1)]
+    # Beam state: (cx, cy, first_move, cumulative_danger)
+    b_cx = np.zeros(K, dtype=np.int32)
+    b_cy = np.zeros(K, dtype=np.int32)
+    b_fm = np.full(K, -1, dtype=np.int32)
+    b_sc = np.full(K, 1e30, dtype=np.float64)
+    b_cx[0] = sx; b_cy[0] = sy; b_fm[0] = -1; b_sc[0] = 0.0
+    b_cnt = 1
     
-    # Queue: (cx, cy, depth)
-    q = deque()
-    q.append((sx, sy, 0))
-    visited[0][sy][sx] = (-1, -1, -1, -1)  # root marker
+    cand_cx = np.zeros(K * 9, dtype=np.int32)
+    cand_cy = np.zeros(K * 9, dtype=np.int32)
+    cand_fm = np.zeros(K * 9, dtype=np.int32)
+    cand_sc = np.full(K * 9, 1e30, dtype=np.float64)
     
-    # Best goal: (danger_score, cx, cy) — lower is better
-    best = (1e30, -1, -1, -1)  # danger, cx, cy, move_idx
-    
-    while q:
-        cx, cy, d = q.popleft()
+    for d in range(max_d):
         nd = d + 1
+        ci = 0
         
-        if nd > max_d:
-            # Reached max depth — check if this is the best goal
-            danger = float(grids[d][cy][cx])
-            # Prefer center: mild pull toward center cells
-            center_bonus = abs(cx - gx//2) * 0.5 + abs(cy - gy//2) * 0.5
-            score = danger + center_bonus
-            if score < best[0]:
-                best = (score, cx, cy, d)
-            continue
+        for bi in range(b_cnt):
+            for mi in range(9):
+                nx = b_cx[bi] + MOVE_DX[mi]
+                ny = b_cy[bi] + MOVE_DY[mi]
+                if nx < 0 or nx >= gx or ny < 0 or ny >= gy:
+                    continue
+                
+                danger = float(grids[nd][ny][nx])
+                if danger > 50000:  # blocked
+                    continue
+                
+                # Cumulative danger (1/r² weighted by depth)
+                w = 1.0 / (0.5 + (nd * STEP) * 0.03)
+                total = b_sc[bi] + danger * w
+                
+                cand_cx[ci] = nx; cand_cy[ci] = ny
+                cand_fm[ci] = b_fm[bi] if b_fm[bi] >= 0 else mi
+                cand_sc[ci] = total
+                ci += 1
         
-        # Expand 9 moves at next depth
-        for mi in range(9):
-            nx, ny = cx + MOVE_DX[mi], cy + MOVE_DY[mi]
-            if nx < 0 or nx >= gx or ny < 0 or ny >= gy:
-                continue
-            if visited[nd][ny][nx] is not None:
-                continue
-            
-            # Safety check: block cells with danger above threshold
-            cell_danger = float(grids[nd][ny][nx])
-            if cell_danger > BLOCK_THRESHOLD:
-                continue
-            
-            visited[nd][ny][nx] = (cx, cy, d, mi)
-            q.append((nx, ny, nd))
+        # Top-K selection (insertion sort)
+        for k in range(K):
+            b_cx[k] = -1; b_sc[k] = 1e30
+        b_cnt = 0
+        for i in range(ci):
+            score = cand_sc[i]
+            for k in range(K):
+                if score < b_sc[k]:
+                    for j in range(K - 1, k, -1):
+                        b_cx[j] = b_cx[j-1]; b_cy[j] = b_cy[j-1]
+                        b_fm[j] = b_fm[j-1]; b_sc[j] = b_sc[j-1]
+                    b_cx[k] = cand_cx[i]; b_cy[k] = cand_cy[i]
+                    b_fm[k] = cand_fm[i]; b_sc[k] = score
+                    b_cnt = max(b_cnt, k + 1)
+                    break
     
-    # No path found to max depth — find longest reachable depth
-    if best[2] < 0:
-        for d in range(max_d, 0, -1):
-            for cy in range(gy):
-                for cx in range(gx):
-                    if visited[d][cy][cx] is not None:
-                        danger = float(grids[d][cy][cx])
-                        if danger < best[0]:
-                            best = (danger, cx, cy, d)
-            if best[2] >= 0:
-                break
-    
-    if best[2] < 0:
-        return False, 0
-    
-    # Trace path back to find first move
-    bcx, bcy, bd = best[1], best[2], best[3]
-    while bd > 1 and visited[bd][bcy][bcx] is not None:
-        pcx, pcy, pd, mi = visited[bd][bcy][bcx]
-        if pd == 0:  # Found the move from root
-            return True, mi
-        bcx, bcy, bd = pcx, pcy, pd
-    
-    return False, 0
+    return b_fm[0]
 
 
 class AStarAI:
@@ -140,9 +126,8 @@ class AStarAI:
             t2 = types == 2
             if t2.any():
                 t2i = np.where(t2)[0]
-                t2b = [bullets[i] for i in t2i]
-                bvx[t2] = np.array([b.vx for b in t2b], dtype=np.float64) / 64.0
-                bvy[t2] = np.array([b.vy for b in t2b], dtype=np.float64) / 64.0
+                bvx[t2] = np.array([bullets[i].vx for i in t2i], dtype=np.float64) / 64.0
+                bvy[t2] = np.array([bullets[i].vy for i in t2i], dtype=np.float64) / 64.0
         
         grids = []
         for d in range(DEPTH + 1):
@@ -151,12 +136,13 @@ class AStarAI:
         
         sx = max(0, min(GX - 1, int(px // CELL)))
         sy = max(0, min(GY - 1, int(py // CELL)))
-        f, m = bfs_search(grids, sx, sy, GX, GY, DEPTH)
-        if f: return int(BITS[m])
+        best = beam_on_grid(grids, sx, sy, GX, GY, DEPTH, BEAM_K)
         
-        # Repulsion fallback
+        if best >= 0:
+            return int(BITS_ARR[best])
+        
         fx, fy = 0.0, 0.0
-        for i in range(len(bx)):
+        for i in range(n):
             dx = px - bx[i]; dy = py - by[i]
             d2 = dx*dx + dy*dy
             if d2 < 0.1: d2 = 0.1
@@ -170,5 +156,5 @@ class AStarAI:
                 mm = (mdx*mdx + mdy*mdy)**0.5
                 vm = max(abs(fx)+abs(fy), 0.001)
                 dot = (mdx*fx + mdy*fy) / (mm * vm)
-            if dot > bd: bd, bb = dot, BITS[mi]
+            if dot > bd: bd, bb = dot, BITS_ARR[mi]
         return bb
