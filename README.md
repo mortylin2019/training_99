@@ -7,7 +7,7 @@ Reverse-engineered Japanese bullet-hell survival game. Python AIs attach to the 
     <img src="assets/demo_thumb.jpg" width="480" alt="▶ Watch Demo">
   </a>
   <br><b>▶ Watch Demo</b> — 153.7s survival, Normal difficulty
-  <br><i>ai_beam dodging 50+ bullets — beam search with 80-frame lookahead</i>
+  <br><i>ai_beam dodging 50+ bullets — beam search with 160-frame lookahead</i>
 </p>
 
 ## Why
@@ -22,7 +22,8 @@ Now with all the new AI tools, I can reverse-engineer the EXE, attach real-time 
 |---|---|---|---|---|---|
 | `ai_basic` | 8.8s | 10.3s | 2.8s | 21.1s | 1/r² repulsion + wall avoidance + center pull |
 | `ai_beam` (W=12, CE=4) | 69.6s | 71.9s | 7.4s | 148.5s | Beam search, 160-frame lookahead |
-| `ai_mcts` (1000iter) | 22.3s | 24.4s | 2.4s | 53.6s | Progressive widening, guided rollouts |
+
+> **`ai_nn`** (neural-guided beam search) is ongoing work — DeepSet attention model trained on beam search demonstrations. See `tools/train_nn.py`.
 
 ## Quick Start
 
@@ -36,7 +37,7 @@ Available AIs: `ai_basic`, `ai_beam`, `ai_mcts`, `ai_nn`, `ai_nn_greedy`
 
 ### Compare AIs
 ```bash
-python tools/bench_compare.py --runs 10 --ai ai_basic,ai_beam,ai_mcts
+python tools/bench_compare.py --runs 10 --ai ai_basic,ai_beam
 ```
 
 ### Live Game (Windows only, requires `raw/99.exe`)
@@ -78,15 +79,72 @@ The AI reads player position, active bullets, and game state from memory. It dec
 ## AI Algorithms
 
 ### `ai_basic` — 1/r² Repulsion Field
-Each bullet exerts a repulsive force `F = 1/r²`. Wall edges exert a 1/d² repulsion to prevent wall-hugging deaths. A gentle center-pull force prevents drifting into corners. Sum all force vectors → move in the net repulsion direction. Zero lookahead, zero velocity prediction. Pure reactive physics.
+
+Each bullet exerts a repulsive force `F = 1/r²`. Wall edges exert a 1/d² repulsion to prevent wall-hugging deaths. A gentle center-pull force prevents drifting into corners. Sum all force vectors → move in the net repulsion direction. Zero lookahead, zero velocity prediction. Pure reactive physics. O(9+N) per frame.
 
 ### `ai_beam` — Time-Space Beam Search
-Precomputes 80-frame bullet trajectories via linear velocity extrapolation. At each depth step, evaluates 9×K candidate positions with inverse-square danger scoring + wall penalty + center pull. Keeps top K=50 paths. Intermediate frames checked for fatal collisions between beam steps. Finds escape routes through bullet convergence patterns that simpler AIs miss.
 
-### `ai_nn` (NNBoostedBeam) — Neural-Guided Beam Search
-Runs beam search TWICE per frame: once normally, once with the NN's preferred escape move forced at depth 0. Compares intermediate danger scores of both paths. The NN (trained on 769K beam search demonstrations) sees the escape gap from a single frame — beam search prunes it at depth 2 because the danger hasn't manifested yet. The forced beam lets the escape path survive until depth 15+ where future scores reveal its value.
+Beam search treats the game as a tree search over time: "if I move in direction D now, where will every bullet be 160 frames from now, and how dangerous is that position?"
 
-**Model**: DeepSet attention-pooling (77K params) with relative bullet positions. 72% validation accuracy on beam search move prediction. Policy head outputs 9-way move probabilities; value head estimates survival time.
+#### How It Works
+
+**1. Bullet Trajectory Prediction**
+
+Before the beam search starts, all active bullets have their future positions precomputed 120 frames ahead via linear velocity extrapolation. For each bullet at angle `θ`, the game uses a 64-entry velocity lookup table (`VEL_TABLE[θ] = (vx, vy)`). The prediction is exact for Type 0 (normal) and Type 3 (accelerating) bullets — they move at constant velocity. Type 1 (homing) and Type 2 (bounce) bullets can change direction, but the linear approximation works well enough for scoring.
+
+**2. Multi-Beam Search**
+
+Instead of one beam, 9 independent beams run in parallel — each locked to a different first move (STOP, LEFT, RIGHT, UP, DOWN, and 4 diagonals). This prevents the single winning move from dominating early and missing escape paths that only reveal their value later. Each beam:
+
+- **Depth**: 40 beam steps × CE=4 frames/step = **160 frames** of temporal coverage (~2.5 seconds)
+- **Width**: W=12 — keeps the top 12 candidate positions at each depth step
+- **Branching**: At each step, generates 9 candidate next positions (all move directions)
+
+**3. Scoring Function**
+
+Each candidate position `(px, py)` at depth `t` is scored against all active bullet positions `(bx, by)`:
+
+```
+danger = Σ  DANGER_BASE / dx² + dy²       (inverse-square, per bullet)
+       + WALL_PENALTY * max(0, 1 - dist/WALL_MARGIN)²  (wall danger)
+       - CENTER_PULL * dist_to_center²     (center reward)
+```
+
+- `DANGER_BASE = 3000` — makes even distant bullets contribute meaningfully
+- `WALL_PENALTY = 5000`, `WALL_MARGIN = 20px` — steep penalty near edges
+- `CENTER_PULL = 0.3` — gentle bias toward center, prevents corner camping
+- `SAFETY_MARGIN = 2px` — extra clearance around the 11×10 hitbox
+
+Bullets inside the hitbox (including safety margin) assign `COLLISION_VAL = 1e8` — instant discard.
+
+**4. Early Exit Optimization**
+
+At each depth step, candidates are sorted by cumulative danger. If a candidate's danger exceeds the current best candidate's danger by `EARLY_EXIT_BUFFER = 50000`, the bullet loop exits early — that candidate can't possibly win. This is the primary speed optimization, cutting evaluation time by ~40% in dense patterns.
+
+**5. Why CE=4 (Check Every 4 frames)**
+
+Coarser stepping (evaluating positions every 4th frame instead of every frame) provides two benefits:
+
+- **Implicit smoothing**: Small bullet movements between check frames average out, reducing noise in the danger signal
+- **Extended temporal range**: 40 steps × CE=4 = 160 frames of coverage vs 40 steps × CE=1 = 40 frames
+
+CE=1 would give finer-grained evaluation but half the lookahead distance. The 160-frame range is critical — beam search sees bullet convergence patterns that simpler AIs react to 2 seconds too late.
+
+**6. Path Selection**
+
+After all 9 beams complete, the winning first move is selected: the move whose beam achieved the lowest cumulative danger across its best path. This is the direction the AI moves for the next frame. The whole process repeats every frame (~2.7ms per decision).
+
+#### Why Beam Search Wins
+
+The game's core challenge is spatial-temporal reasoning: finding gaps in moving bullet patterns before they close. Beam search solves this by **explicitly simulating the future** — it doesn't guess or learn, it computes where everything will be and finds the path through.
+
+The 160-frame lookahead means it sees escape routes through dense patterns that would take a human (or a reactive AI) 2+ seconds to recognize. Combined with inverse-square danger scoring, it naturally prefers positions with more clearance, trading slight danger now for safety later.
+
+### `ai_nn` (NNBoostedBeam) — Ongoing Work
+
+Neural-guided beam search. A DeepSet attention-pooling model (77K params) trained on beam search demonstrations predicts which escape direction the beam search will choose. The NN runs the beam search twice: once normally, once with the NN's predicted move forced at depth 0. If the forced path scores better at depth 15+, the NN's move is used — it saw the escape gap before beam search pruned it.
+
+Training: `python tools/gen_training_data.py --seeds 1000 --workers 16` then `python tools/train_nn.py --epochs 100`.
 
 ## Architecture
 
