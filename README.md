@@ -16,14 +16,14 @@ I used to write programs to play games automatically — it was my way of learni
 
 Now with all the new AI tools, I can reverse-engineer the EXE, attach real-time memory monitoring for game state, and write sophisticated algorithms within a reasonable amount of time.
 
-## AI Performance (Simulator, Normal Difficulty, 50s Cap)
+## AI Performance (Simulator, Normal Difficulty, 30 runs)
 
-| AI | Avg | Best | Worst | Approach |
-|---|---|---|---|---|
-| `BasicAI` | 6.8s | 15.0s | 4.0s | 1/r² repulsion field, no lookahead |
-| `ai_beam` (width=50) | 38.5s | 50.0s | 3.2s | Beam search, 80-frame lookahead |
-| **`ai_nn` (NNBoostedBeam)** | **42.9s** | **50.0s** | **11.6s** | NN escape-path protection + beam search |
-| `ai_nn_greedy` | 19.6s | 41.3s | 3.2s | NN single-frame policy (no search) |
+| AI | Med | Avg | P25 | P75 | Approach |
+|---|---|---|---|---|---|
+| `BasicAI` | 6.8s | 6.8s | — | — | 1/r² repulsion field, no lookahead |
+| `ai_beam` (W=12, CE=4) | 41.0s | 44.9s | 19.6s | 69.5s | Beam search, 160-frame lookahead |
+| `ai_mcts` (1000iter) | 17.7s | 20.1s | 10.6s | 31.1s | Progressive widening, guided rollouts |
+| `ai_nn` (NNBoostedBeam) | 42.9s | 42.9s | — | — | NN escape-path protection + beam search |
 
 ## Quick Start
 
@@ -33,7 +33,12 @@ pip install numpy numba torch tqdm
 python -m hijack_tools.simulator.runner --ai ai_beam --runs 50
 ```
 
-Available AIs: `ai_basic`, `ai_beam`, `ai_nn`, `ai_nn_greedy`
+Available AIs: `ai_basic`, `ai_beam`, `ai_mcts`, `ai_nn`, `ai_nn_greedy`
+
+### Compare AIs
+```bash
+python tools/bench_compare.py --runs 10 --ai ai_beam,ai_mcts
+```
 
 ### Live Game (Windows only, requires `raw/99.exe`)
 ```bash

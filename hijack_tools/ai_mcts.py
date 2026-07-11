@@ -40,7 +40,10 @@ class MctSAI:
         return self.vel_table[idx] / 64.0
 
     def _config_kwargs(self):
-        import hijack_tools.algo_config as c
+        try:
+            import hijack_tools.algo_config as c
+        except ImportError:
+            import algo_config as c
         return dict(
             beam_depth=20, beam_width=c.BEAM_WIDTH,  # 20-frame sweet spot for guided rollouts
             check_every=1,  # fine-grained stepping essential for softmax quality
@@ -56,7 +59,10 @@ class MctSAI:
         )
 
     def _predict(self, bullets, px=0, py=0):
-        import hijack_tools.algo_config as c
+        try:
+            import hijack_tools.algo_config as c
+        except ImportError:
+            import algo_config as c
         n = len(bullets)
         T = 21  # beam_depth=20 + 1, each timestep covers check_every=4 real frames
         if n == 0:
@@ -148,7 +154,10 @@ class MctSAI:
         return paths
 
     def decide(self, px, py, bullets):
-        import hijack_tools.algo_config as c
+        try:
+            import hijack_tools.algo_config as c
+        except ImportError:
+            import algo_config as c
         if not bullets:
             return 0
         if px <= 0 or py <= 0:

@@ -33,7 +33,10 @@ class BeamAI:
         return self.vel_table[idx] / 64.0
 
     def _config_kwargs(self):
-        import hijack_tools.algo_config as c
+        try:
+            import hijack_tools.algo_config as c
+        except ImportError:
+            import algo_config as c
         return dict(
             beam_width=c.BEAM_WIDTH, beam_depth=c.BEAM_DEPTH,
             check_every=c.CHECK_EVERY,
@@ -49,7 +52,10 @@ class BeamAI:
         )
 
     def _predict(self, bullets, px=0, py=0):
-        import hijack_tools.algo_config as c
+        try:
+            import hijack_tools.algo_config as c
+        except ImportError:
+            import algo_config as c
         n = len(bullets)
         T = c.BEAM_DEPTH * c.CHECK_EVERY + 1
         if n == 0:
@@ -128,7 +134,10 @@ class BeamAI:
         return paths
 
     def decide(self, px, py, bullets):
-        import hijack_tools.algo_config as c
+        try:
+            import hijack_tools.algo_config as c
+        except ImportError:
+            import algo_config as c
         if not bullets:
             return 0
         if px <= 0 or py <= 0:
