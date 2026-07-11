@@ -139,13 +139,13 @@ def spawn_bullet(slot_raw_x, slot_raw_y, slot_fields,
     elif edge == 1:  # Bottom
         rng_state, rv = rng_next(rng_state)
         slot_raw_x = rv % SPAWN_RANGE_X
-        slot_raw_y = RAW_MAX_Y
+        slot_raw_y = SPAWN_RANGE_Y       # C: 0x3D00
     elif edge == 2:  # Left
         slot_raw_x = 0
         rng_state, rv = rng_next(rng_state)
         slot_raw_y = rv % SPAWN_RANGE_Y
     else:            # Right
-        slot_raw_x = RAW_MAX_X
+        slot_raw_x = SPAWN_RANGE_X       # C: 0x5100
         rng_state, rv = rng_next(rng_state)
         slot_raw_y = rv % SPAWN_RANGE_Y
 
