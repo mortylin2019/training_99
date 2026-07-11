@@ -106,6 +106,23 @@ class SimControl:
     def read_rng_state(self):
         return self._sim.rng.state
 
+    def get_next_pattern(self):
+        return self._sim.pattern
+
+    def get_active_near(self):
+        return self._sim.active_near
+
+    def read_int(self, addr):
+        """Read simulated memory address."""
+        if addr == 0x00405c00:
+            return self._sim.rng.state
+        if addr == 0x00406dbc:
+            return self._sim.pattern
+        return 0
+
+    def cleanup(self):
+        pass
+
     def read_memory(self, addr, size):
         """Read simulated memory: supports VEL_TABLE at 0x00405d74."""
         import struct
