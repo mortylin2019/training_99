@@ -105,7 +105,7 @@ _TW_RATE = TIME_WEIGHT_RATE
 _EFF_MARGIN = SAFETY_MARGIN  # always enabled in Python beam
 
 
-@njit(cache=True)
+@njit
 def _score_pos(px, py, bullets_t):
     """Full danger scoring with early termination against best-so-far."""
     B = bullets_t.shape[0]
@@ -131,7 +131,7 @@ def _score_pos(px, py, bullets_t):
     return danger, False
 
 
-@njit(cache=True)
+@njit
 def _score_pos_early_exit(px, py, bullets_t, best_so_far, buffer):
     """Scoring with early termination — stops when candidate can't win.
 
@@ -166,7 +166,7 @@ def _score_pos_early_exit(px, py, bullets_t, best_so_far, buffer):
     return danger + wall_ctr, False
 
 
-@njit(cache=True)
+@njit
 def _check_collision(px, py, bullets_t):
     """Fast collision-only check — no danger score, just fatal yes/no."""
     B = bullets_t.shape[0]
@@ -179,7 +179,7 @@ def _check_collision(px, py, bullets_t):
     return False
 
 
-@njit(cache=True)
+@njit
 def _beam_search(px0, py0, paths):
     """Beam search with partial top-K selection + early-termination scoring."""
     K = BEAM_WIDTH
