@@ -242,7 +242,7 @@ class GameOracle:
         """
         self.set_input_state(input_bits)
         before = self.capture_frame_state()
-        # Wait for one frame (~12.5ms at 80fps)
+        # Wait for one frame (~16ms at 62fps)
         time.sleep(0.02)
         after = self.capture_frame_state()
         return before, after

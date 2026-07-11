@@ -54,4 +54,4 @@ for depth in [40, 80, 120, 160]:
                   center_pull_enabled=True, wall_penalty_enabled=True)
         profile(f"MULTI D={depth:>3} W={width:>2}", multi_beam_py, 152.0, 112.0, paths, **kw)
 
-print("\nGame budget: 80 fps = 12.5ms/frame")
+print("\nGame budget: 62 fps = 16ms/frame")

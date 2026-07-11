@@ -27,7 +27,8 @@ def run_one(ai_cls, difficulty, seed, max_frames=40000):
         alive, _ = sim.step(move)
         if not alive:
             break
-    return sim.frame / 80.0
+    from hijack_tools.simulator.config import FPS as SIM_FPS
+return sim.frame / SIM_FPS
 
 
 def main():

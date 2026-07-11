@@ -143,7 +143,7 @@ class CrossValidator:
     def _step_one_frame(self, input_bits=0):
         """Step exactly ONE game frame: write input, sleep exactly 1 frame, stop input."""
         self.game.write_int(0x00406d7c, input_bits)
-        time.sleep(0.012)  # ~1 frame at 80fps (12.5ms), safe at 60fps (16ms)
+        time.sleep(0.012)  # ~1 frame at 62fps (16ms), safe margin
         self.game.write_int(0x00406d7c, 0)
         # Read result
         return self._read_player()

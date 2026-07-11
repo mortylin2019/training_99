@@ -20,6 +20,7 @@ from tqdm import tqdm
 # Ensure hijack_tools is importable from project root (needed by subprocess workers via fork)
 _PROJ_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, _PROJ_ROOT)
+from hijack_tools.simulator.config import FPS as SIM_FPS
 # ai_beam.py uses bare `from algo_config import ...` — add hijack_tools/ to sys.path
 sys.path.insert(0, os.path.join(_PROJ_ROOT, 'hijack_tools'))
 
@@ -142,10 +143,10 @@ def run_seed(args):
     except Exception as e:
         print(f"Seed {seed_idx} error: {e}")
 
-    survival = sim.frame / 80.0
+    survival = sim.frame / SIM_FPS
 
     # Tag each sample with remaining survival (for value head target)
-    tagged = [(px, py, state, move, survival - (i * FRAMES_PER_SAVE / 80))
+    tagged = [(px, py, state, move, survival - (i * FRAMES_PER_SAVE / SIM_FPS))
               for i, (px, py, state, move) in enumerate(samples)]
 
     n = save_shard(seed_idx, tagged, survival, shard_dir)

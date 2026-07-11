@@ -80,7 +80,8 @@ def capture_death(ai_name, seed, difficulty, max_frames, log_frames):
     # Add death info
     death_frame = {
         'death_frame': sim.frame,
-        'survival_s': sim.frame / 80.0,
+        from hijack_tools.simulator.config import FPS as SIM_FPS
+'survival_s': sim.frame / SIM_FPS,
         'config': {
             'ai': ai_name,
             'seed': seed,

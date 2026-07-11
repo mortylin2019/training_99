@@ -33,8 +33,8 @@ This file (`Game_EntityLoop`) contains the core game logic for the PLAYING state
    - `G_CurrentBulletCount` starts at difficulty level and only increments on spawn
 
 5. **Pattern System**:
-   - 12.5% chance every 5s to start a pattern
-   - Patterns last 100 frames, then cooldown 5s
+- 37.5% chance (0x3000/0x8000) every 5s to start a pattern
+- Patterns last 10s (10000ms timer), then cooldown 5s. G_PatternDuration=100 is display-only.
    - Pattern bar displayed at top of screen via `BitBlt`
 
 6. **Player Movement** (in `FUN_00403400`):
