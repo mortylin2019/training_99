@@ -69,6 +69,7 @@ try:
         PARTIAL_SORT_ENABLED, FAST_COLLISION_ENABLED,
         CENTER_PULL_ENABLED, WALL_PENALTY_ENABLED,
         SOFT_COMMIT_ENABLED, SOFT_COMMIT_FRAMES, SOFT_COMMIT_PANIC,
+        SPAWN_PREDICT_ENABLED, SPAWN_INTERVAL_FRAMES, SPAWN_PREDICT_WEIGHT,
     )
 except ImportError:
     from hijack_tools.algo_config import (
@@ -85,6 +86,7 @@ except ImportError:
         PARTIAL_SORT_ENABLED, FAST_COLLISION_ENABLED,
         CENTER_PULL_ENABLED, WALL_PENALTY_ENABLED,
         SOFT_COMMIT_ENABLED, SOFT_COMMIT_FRAMES, SOFT_COMMIT_PANIC,
+        SPAWN_PREDICT_ENABLED, SPAWN_INTERVAL_FRAMES, SPAWN_PREDICT_WEIGHT,
     )
 
 # Convert to numpy arrays for numba JIT
@@ -379,6 +381,7 @@ class BeamAI:
         self.accel_table = np.array(accel_table or [(0, 0)], dtype=np.float32)
         self._commit_counter = 0
         self._commit_bits = 0
+        self._frame_count = 0
 
     def _velocity(self, angles):
         idx = np.clip((angles & 0x3F).astype(np.int32), 0, len(self.vel_table) - 1)
@@ -496,6 +499,44 @@ class BeamAI:
         if SOFT_COMMIT_ENABLED:
             self._commit_counter = SOFT_COMMIT_FRAMES
             self._commit_bits = bits
+
+        # ── Spawn prediction: avoid edges near spawn intervals ──
+        self._frame_count += 1
+        if SPAWN_PREDICT_ENABLED:
+            f = self._frame_count
+            frames_to_spawn = SPAWN_INTERVAL_FRAMES - (f % SPAWN_INTERVAL_FRAMES)
+            if frames_to_spawn < 30:
+                # Check if chosen move goes toward an edge
+                idx = 0
+                for i, b in enumerate(BITS):
+                    if b == bits:
+                        idx = i
+                        break
+                dx = MOVES[idx, 0]; dy = MOVES[idx, 1]
+                nx = px + dx; ny = py + dy
+                margin = WALL_MARGIN
+                if (nx < margin or nx > SCR_W - margin
+                        or ny < margin or ny > SCR_H - margin):
+                    # Override: move toward center instead
+                    cx = 0.0; cy = 0.0
+                    if px < CTR_X: cx = 1.0
+                    elif px > CTR_X: cx = -1.0
+                    if py < CTR_Y: cy = 1.0
+                    elif py > CTR_Y: cy = -1.0
+                    # Find closest discrete move to center direction
+                    best_dot = -float('inf')
+                    for mi in range(9):
+                        mdx, mdy = MOVES[mi]
+                        if mdx == 0 and mdy == 0: continue
+                        mmag = (mdx*mdx + mdy*mdy)**0.5
+                        vmag = max(abs(cx)+abs(cy), 0.001)
+                        dot = (mdx*cx + mdy*cy) / (mmag * vmag)
+                        if dot > best_dot:
+                            best_dot = dot
+                            bits = int(BITS[mi])
+                    if SOFT_COMMIT_ENABLED:
+                        self._commit_bits = bits
+
         return bits
 
 

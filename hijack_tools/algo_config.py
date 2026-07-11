@@ -99,3 +99,6 @@ WALL_PENALTY_ENABLED = True    # penalty for approaching screen edges
 SOFT_COMMIT_ENABLED  = True    # hold direction for N frames (reduces oscillation)
 SOFT_COMMIT_FRAMES   = 8       # frames to hold direction before replanning
 SOFT_COMMIT_PANIC    = 30      # px — release commit if bullet within this radius
+SPAWN_PREDICT_ENABLED = True    # anticipate bullet waves at known spawn intervals
+SPAWN_INTERVAL_FRAMES = 240     # frames between bullet spawns (3000ms at 80fps)
+SPAWN_PREDICT_WEIGHT  = 500.0   # danger added per screen edge at spawn time
