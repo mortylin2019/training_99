@@ -71,6 +71,7 @@ try:
         SOFT_COMMIT_ENABLED, SOFT_COMMIT_FRAMES, SOFT_COMMIT_PANIC,
         SPAWN_PREDICT_ENABLED, SPAWN_INTERVAL_FRAMES, SPAWN_PREDICT_WEIGHT,
         SPAWN_PREDICT_WINDOW,
+        STRATEGIC_ESCAPE_ENABLED, STRATEGIC_ESCAPE_FRAMES,
     )
 except ImportError:
     from hijack_tools.algo_config import (
@@ -89,6 +90,7 @@ except ImportError:
         SOFT_COMMIT_ENABLED, SOFT_COMMIT_FRAMES, SOFT_COMMIT_PANIC,
         SPAWN_PREDICT_ENABLED, SPAWN_INTERVAL_FRAMES, SPAWN_PREDICT_WEIGHT,
         SPAWN_PREDICT_WINDOW,
+        STRATEGIC_ESCAPE_ENABLED, STRATEGIC_ESCAPE_FRAMES,
     )
 
 # Convert to numpy arrays for numba JIT
@@ -485,6 +487,11 @@ class BeamAI:
             return 0
         if px <= 0 or py <= 0:
             px, py = CTR_X, CTR_Y
+
+        # ── Strategic escape: commit to initial direction for first N frames ──
+        if STRATEGIC_ESCAPE_ENABLED and self._frame_count < STRATEGIC_ESCAPE_FRAMES:
+            self._frame_count += 1
+            return 12  # DOWN-RIGHT — largest open space from spawn (152,44)
 
         # ── Short-circuit: if no bullet is within 80px and not near wall,
         #     skip expensive beam search — just maximize distance.
