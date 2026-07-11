@@ -60,11 +60,17 @@ def load_ai(name):
     raise ValueError(f"Unknown AI: {name}. Choices: ai_basic, ai_beam, ai_nn, ai_nn_greedy, ai_smooth, ai_mcts")
 
 
-def run(ai_name="ai_beam", max_runs=10, video=False, ui=False, embed=False):
-    game = GameControl()
-    if not game.launch_game():
-        logger.error("Failed to launch game")
-        return
+def run(ai_name="ai_beam", max_runs=10, video=False, ui=False, embed=False,
+        sim=False, difficulty=1, seed=0, log_rng=False):
+    if sim:
+        from sim_control import SimControl
+        game = SimControl(difficulty=difficulty, seed=seed)
+        game.launch_game()
+    else:
+        game = GameControl()
+        if not game.launch_game():
+            logger.error("Failed to launch game")
+            return
 
     AI = load_ai(ai_name)
     ai = AI(vel_table=game.vel_table, accel_table=game.accel_table)
@@ -317,6 +323,14 @@ def run(ai_name="ai_beam", max_runs=10, video=False, ui=False, embed=False):
                     logger.warning(f"Slow decide() on frame {run_frames}: {_dt:.0f}ms (JIT?)")
                 game.write_int(0x00406d7c, bits)
 
+                # ── RNG logging ──
+                if log_rng and run_frames % 60 == 0:  # every ~1s
+                    try:
+                        rng = game.read_int(0x00405c00) if hasattr(game, 'read_int') else game.read_rng_state()
+                        logger.debug(f"RNG f{run_frames}: 0x{rng:08X}")
+                    except Exception:
+                        pass
+
                 # ── Capture video frame ──
                 if recorder and recorder.is_recording:
                     recorder.capture_frame()
@@ -450,5 +464,14 @@ if __name__ == "__main__":
                    help="Show AI monitor overlay window with live stats + bullet viz")
     p.add_argument("--embed", action="store_true",
                    help="Embed the game window inside the AI monitor (implies --ui)")
+    p.add_argument("--sim", action="store_true",
+                   help="Use offline simulator instead of real 99.exe")
+    p.add_argument("--difficulty", type=int, default=1, choices=[0,1,2,3],
+                   help="Simulator difficulty: 0=Easy, 1=Normal, 2=Hard, 3=Lunatic")
+    p.add_argument("--seed", type=int, default=0,
+                   help="Simulator RNG seed")
+    p.add_argument("--log-rng", action="store_true",
+                   help="Log RNG state each frame (real game: 0x00405c00, sim: LCG.state)")
     args = p.parse_args()
-    run(args.ai, args.runs, video=args.video, ui=args.ui or args.embed, embed=args.embed)
+    run(args.ai, args.runs, video=args.video, ui=args.ui or args.embed, embed=args.embed,
+        sim=args.sim, difficulty=args.difficulty, seed=args.seed, log_rng=args.log_rng)
