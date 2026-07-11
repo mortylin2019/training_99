@@ -4,12 +4,12 @@ algo_config.py — Beam Search Algorithm Configuration
 Single source of truth for all beam search parameters.
 Shared by ai_beam.py (Python) and ai_nn.py.
 
-DESIGN (2026-07-11, optimised pipeline):
+DESIGN (2026-07-12, Windows-optimised):
+    BEAM_WIDTH=100 — 6.3ms decide() on Windows (LTO + target-cpu=native).
+    MULTI_BEAM_ENABLED=False — beam_search with internal rayon is 2x faster.
     CHECK_EVERY=4 — coarser stepping = implicit smoothing, 160-frame temporal range.
-    BEAM_WIDTH=200 — 200 candidates/depth, viable at 7.6ms (reciprocal table + parallel scoring).
     Rust beam_core: reciprocal 1/d² lookup table replaces f64 division.
-    beam_search: parallel candidate scoring via rayon (standalone path).
-    beam_search_forced: sequential scoring (called inside 9-way rayon in multi_beam).
+    beam_search: parallel candidate scoring via rayon.
     No direction persistence (no soft-commit, no strategic escape).
     No spawn prediction (keeps things fair — no future knowledge).
 
@@ -37,7 +37,7 @@ HIT_Y1, HIT_Y2 = 0.0, 10.0    # 10px tall
 
 # ── Beam search parameters ─────────────────────────────────
 BEAM_DEPTH   = 40       # frames of lookahead (0.5s — distant bullets negligible)
-BEAM_WIDTH   = 25       # top-K paths per depth (25 = 8.9ms on Windows, 50=11.4ms)
+BEAM_WIDTH   = 100      # top-K paths per depth (100 = 6.3ms decide(), well within 16ms budget)
 CHECK_EVERY  = 4        # frames per beam step (4 = proven optimal, experiment_log §final)
 
 # ── Scoring weights ────────────────────────────────────────
