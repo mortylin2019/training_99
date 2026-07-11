@@ -7,7 +7,7 @@
 A bullet-hell survival game. Objective: avoid bullets. One hit = death. Features 4 difficulty levels, 7 bullet pattern types, a graze scoring system, and a humorous ranking screen.
 
 - **Resolution**: 320×240 (0x140 × 0xF0) — player clamped to 304×224 (0x130 × 0xE0)
-- **Frame rate**: ~80 FPS (ScoreType 1), unlocked (ScoreType 2)
+- **Frame rate**: ~62.5 FPS (Standard, ScoreMultiplier=16), ~83 FPS (ScoreType 1, multiplier=12), unlocked (ScoreType 2)
 - **Window class**: `TKKN`, title: `特訓９９`
 
 ## 2. Difficulty vs Score Mode — TWO separate settings
@@ -25,8 +25,8 @@ A bullet-hell survival game. Objective: avoid bullets. One hit = death. Features
 
 | Value | Multiplier | Frame rate | String |
 |---|---|---|---|
-| 0 | 16 (0x10) | ~80 FPS | (Standard) |
-| 1 | 12 (0xC) | ~80 FPS | "なんとなく80フレーム/秒" |
+| 0 | 16 (0x10) | ~62.5 FPS | (Standard) |
+| 1 | 12 (0xC) | ~83 FPS | "なんとなく80フレーム/秒" |
 | 2 | 0 | Unlocked | "勢い余って全速力" |
 
 When multiplier = 0: score = raw survival milliseconds, game runs at max CPU speed.
@@ -40,9 +40,9 @@ The game has no explicit "level" system — difficulty is fixed. But difficulty 
    (30/50/100/200) and increments every 3 seconds on spawn, up to 299 max.
    → More bullets on screen over time.
 
-2. **Patterns activate randomly**: 12.5% chance every 5 seconds to start a pattern
+2. **Patterns activate randomly**: 37.5% chance (0x3000/0x8000) every 5 seconds to start a pattern
    (Patterns 1-7 introduce harder bullet types: homing, accelerating, chasing).
-   Patterns last 100 frames (~1.25s), then cooldown 5s.
+   Patterns last 10 seconds (10000ms timer), then cooldown 5s. (G_PatternDuration=100 is a display counter only.)
 
 3. **Bullet recycling**: Off-screen bullets respawn immediately instead of being
    removed — the bullet count only increases, never decreases.
@@ -67,7 +67,7 @@ Player starts at state 2 (sub-menu), SubState=0, then transitions through sub-me
 
 ## 4. Bullet Patterns — `G_NextBulletPattern` at `0x00406dbc`
 
-Patterns cycle randomly: when no pattern is active, 12.5% chance (0x3000/0x10000) of starting one every 5 seconds. Patterns last 100 frames.
+Patterns cycle randomly: when no pattern is active, 37.5% chance (0x3000/0x8000) of starting one every 5 seconds. Pattern active timer is 10 seconds (10000ms). G_PatternDuration=100 is a display-only counter.
 
 | Pattern | Type | Behavior |
 |---|---|---|

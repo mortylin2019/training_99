@@ -47,7 +47,7 @@ pattern:
     4: { type: 1, timer: 0x10, spread: 5 } # Homing, 16-frame
     5: { type: 1, timer: 0, spread: 5 }    # Homing, timer randomized
     6: { type: 3, timer: 0, spread: 5 }    # Accelerating
-    7: { type: 2, timer: 0, spread: 0 }    # H-Accel, no aiming
+    7: { type: 2, timer: 0, spread: 5 }    # H-Accel (fallthrough uses default spread=5)
   # Homing re-target spread (C: FUN_00402d68(extraout_ECX, 3))
   homing_respread: 3
 
