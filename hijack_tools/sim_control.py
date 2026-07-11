@@ -72,6 +72,8 @@ class SimControl:
         return self._dead
 
     def get_survival_ms(self):
+        if self._playing and not self._dead:
+            return int(self._sim.frame / SIM_FPS * 1000)
         return int(self._death_time * 1000) if self._death_time > 0 else 0
 
     def get_game_time(self):
@@ -152,6 +154,7 @@ class SimControl:
         if not self._playing or self._dead:
             return
         alive, _ = self._sim.step(bits)
+        time.sleep(1 / 62.5)  # match real game frame pacing
         if not alive:
             self._dead = True
             self._playing = False
