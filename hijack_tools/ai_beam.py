@@ -389,12 +389,12 @@ class BeamAI:
         idx = np.clip((angles & 0x3F).astype(np.int32), 0, len(self.vel_table) - 1)
         return self.vel_table[idx] / 64.0
 
-    def _predict(self, bullets):
-        """Predict bullet positions with type-aware velocity.
+    def _predict(self, bullets, px=0, py=0):
+        """Predict bullet positions with type-aware physics.
 
         Type 0 (Normal):    VEL_TABLE[angle]  — constant velocity
-        Type 1 (Homing):    VEL_TABLE[angle]  — approximate (re-aims in game)
-        Type 2 (H-Accel):   vx, vy fields     — direct velocity from bullet struct
+        Type 1 (Homing):    VEL_TABLE + re-aim toward (px,py) every timer frames
+        Type 2 (H-Accel):   vx, vy fields + frame-by-frame steering toward player
         Type 3 (Accel):     ACCEL_TABLE[angle] — accelerating velocity
         """
         n = len(bullets)
@@ -431,6 +431,31 @@ class BeamAI:
         paths = np.zeros((n, T, 2), dtype=np.float64)
         paths[:, :, 0] = bx[:, None] + vel[:, 0, None] * ts[None, :]
         paths[:, :, 1] = by[:, None] + vel[:, 1, None] * ts[None, :]
+
+        # Type 1 (Homing): simulate re-aim cycles toward current player position.
+        # At each timer boundary, recompute angle aiming at (px, py) and update path.
+        t1_mask = types == 1
+        if t1_mask.any():
+            for i in np.where(t1_mask)[0]:
+                timer = getattr(bullets[i], 'timer', 48)
+                if timer <= 0:
+                    continue
+                cx = bx[i]; cy = by[i]
+                cur_ang = ang[i]
+                for t in range(1, T):
+                    if t % timer == 0:
+                        # Re-aim: angle toward player (current pos as approximation)
+                        tdx = px - cx; tdy = py - cy
+                        # Simple octant-based angle (matches game's compute_aimed_angle)
+                        ang_rad = np.arctan2(tdy, tdx)
+                        cur_ang = int(((ang_rad / (2 * np.pi) * 64) + 64.5) % 64)
+                    idx = cur_ang & 63
+                    vx_val = self.vel_table[idx, 0] / 64.0
+                    vy_val = self.vel_table[idx, 1] / 64.0
+                    cx += vx_val; cy += vy_val
+                    paths[i, t, 0] = cx
+                    paths[i, t, 1] = cy
+
         return paths
 
     def decide(self, px, py, bullets):
@@ -511,7 +536,7 @@ class BeamAI:
                 predict_bullets = list(bullets) + phantom_bullets
 
         # ── Beam search
-        paths = self._predict(predict_bullets)
+        paths = self._predict(predict_bullets, px, py)
         if USE_MC_SEARCH:
             best = int(_mc_search(float(px), float(py), paths))
         else:
