@@ -22,10 +22,10 @@ struct Cfg {
 impl Default for Cfg {
     fn default() -> Self {
         Cfg {
-            beam_width: 12, beam_depth: 120, check_every: 1, speed: 1.0,
+            beam_width: 12, beam_depth: 40, check_every: 4, speed: 1.0,
             scr_w: 304.0, scr_h: 224.0, ctr_x: 152.0, ctr_y: 112.0,
-            danger_base: 2000.0, safety_margin: 2.0,
-            wall_penalty: 5000.0, wall_margin: 40.0,
+            danger_base: 3000.0, safety_margin: 2.0,
+            wall_penalty: 5000.0, wall_margin: 20.0,
             collision_val: 1e8,
             hit_x1: 2.0, hit_x2: 13.0, hit_y1: 0.0, hit_y2: 10.0,
             tw_base: 0.5, tw_rate: 0.0,

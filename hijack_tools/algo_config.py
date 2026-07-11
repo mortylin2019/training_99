@@ -5,7 +5,8 @@ Single source of truth for all beam search parameters.
 Shared by ai_beam.py (Python) and ai_nn.py.
 
 DESIGN (2026-07-11, simplified pipeline):
-    CHECK_EVERY=1 — every frame is a beam step. No intermediate checks needed.
+    CHECK_EVERY=4 — coarser stepping = implicit smoothing, 160-frame temporal range.
+    BEAM_WIDTH=12 — proven optimal per experiment_log.md §final.
     No direction persistence (no soft-commit, no strategic escape).
     No short-circuit (beam search runs every frame).
     No spawn prediction (keeps things fair — no future knowledge).
