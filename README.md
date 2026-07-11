@@ -20,7 +20,7 @@ Now with all the new AI tools, I can reverse-engineer the EXE, attach real-time 
 
 | AI | Med | Avg | Min | Max | Approach |
 |---|---|---|---|---|---|
-| `ai_basic` | 5.2s | 5.2s | 2.3s | 10.0s | 1/r² repulsion field, no lookahead |
+| `ai_basic` | 8.8s | 10.3s | 2.8s | 21.1s | 1/r² repulsion + wall avoidance + center pull |
 | `ai_beam` (W=12, CE=4) | 69.6s | 71.9s | 7.4s | 148.5s | Beam search, 160-frame lookahead |
 | `ai_mcts` (1000iter) | 22.3s | 24.4s | 2.4s | 53.6s | Progressive widening, guided rollouts |
 
@@ -78,7 +78,7 @@ The AI reads player position, active bullets, and game state from memory. It dec
 ## AI Algorithms
 
 ### `ai_basic` — 1/r² Repulsion Field
-Each bullet exerts a repulsive force `F = 1/r²`. Sum all force vectors → move in the net repulsion direction. Zero lookahead, zero velocity prediction. Pure reactive physics.
+Each bullet exerts a repulsive force `F = 1/r²`. Wall edges exert a 1/d² repulsion to prevent wall-hugging deaths. A gentle center-pull force prevents drifting into corners. Sum all force vectors → move in the net repulsion direction. Zero lookahead, zero velocity prediction. Pure reactive physics.
 
 ### `ai_beam` — Time-Space Beam Search
 Precomputes 80-frame bullet trajectories via linear velocity extrapolation. At each depth step, evaluates 9×K candidate positions with inverse-square danger scoring + wall penalty + center pull. Keeps top K=50 paths. Intermediate frames checked for fatal collisions between beam steps. Finds escape routes through bullet convergence patterns that simpler AIs miss.
