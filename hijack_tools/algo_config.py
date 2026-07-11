@@ -76,7 +76,7 @@ DANGER_BASE   = 2000.0       # inverse-square danger per bullet
 DANGER_POWER  = 2            # 1=1/r, 2=1/r²
 DANGER_DECAY  = 0.85         # time decay per frame (earlier danger counts less)
 SAFETY_MARGIN = 2.0          # extra px clearance around hitbox
-CENTER_PULL   = 5.0          # attraction toward (CTR_X, CTR_Y) — strong!
+CENTER_PULL   = 0.3          # hardcoded in _score_pos — do not change (5.0 tested, harmful)
 WALL_PENALTY  = 5000.0       # penalty for being near screen edge
 WALL_MARGIN   = 40.0         # px from edge where penalty starts (early warning)
 
