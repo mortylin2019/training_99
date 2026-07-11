@@ -101,7 +101,8 @@ SOFT_COMMIT_FRAMES   = 8       # frames to hold direction before replanning
 SOFT_COMMIT_PANIC    = 30      # px — release commit if bullet within this radius
 STRATEGIC_ESCAPE_ENABLED = True  # commit to escape direction for first N frames
 STRATEGIC_ESCAPE_FRAMES = 60    # frames to hold initial escape direction
-SPAWN_PREDICT_ENABLED = True    # anticipate bullet waves at known spawn intervals
+SPAWN_PREDICT_ENABLED = False   # counterproductive — pushes toward center where bullets converge
 SPAWN_INTERVAL_FRAMES = 240     # frames between bullet spawns (3000ms at 80fps)
 SPAWN_PREDICT_WEIGHT  = 500.0   # danger added per screen edge at spawn time
 SPAWN_PREDICT_WINDOW  = 15      # frames before spawn to start avoiding edges
+TIME_WEIGHT_RATE = 0.0          # uniform future weighting (0.03 = myopic, 0.0 = escape-aware)

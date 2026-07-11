@@ -385,6 +385,7 @@ class BeamAI:
         self.accel_table = np.array(accel_table or [(0, 0)], dtype=np.float32)
         self._commit_counter = 0
         self._commit_bits = 0
+        self._escape_bits = 12  # DOWN-RIGHT fallback
         self._frame_count = 0
 
     def _velocity(self, angles):
@@ -488,10 +489,15 @@ class BeamAI:
         if px <= 0 or py <= 0:
             px, py = CTR_X, CTR_Y
 
-        # ── Strategic escape: commit to initial direction for first N frames ──
+        # ── Strategic escape: run beam ONCE at frame 0 to pick best direction ──
         if STRATEGIC_ESCAPE_ENABLED and self._frame_count < STRATEGIC_ESCAPE_FRAMES:
             self._frame_count += 1
-            return 12  # DOWN-RIGHT — largest open space from spawn (152,44)
+            if self._frame_count == 1:
+                # First frame: run beam search to determine escape direction
+                paths = self._predict(bullets, px, py)
+                best = int(_beam_search(float(px), float(py), paths))
+                self._escape_bits = int(BITS[max(best, 0) % len(BITS)])
+            return self._escape_bits
 
         # ── Short-circuit: if no bullet is within 80px and not near wall,
         #     skip expensive beam search — just maximize distance.
