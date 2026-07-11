@@ -54,7 +54,10 @@ def load_ai(name):
     if name == "ai_smooth":
         from ai_nn import SmoothBeamAI
         return SmoothBeamAI
-    raise ValueError(f"Unknown AI: {name}. Choices: ai_basic, ai_beam, ai_nn, ai_nn_greedy, ai_smooth")
+    if name == "ai_mcts":
+        from ai_mcts import MctSAI
+        return MctSAI
+    raise ValueError(f"Unknown AI: {name}. Choices: ai_basic, ai_beam, ai_nn, ai_nn_greedy, ai_smooth, ai_mcts")
 
 
 def run(ai_name="ai_beam", max_runs=10, video=False, ui=False, embed=False):

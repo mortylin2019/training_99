@@ -1,28 +1,35 @@
 """
-ai_beam.py — Beam Search AI for 特訓９９ (Rust/PyO3 backend).
+ai_mcts.py — Progressive Widening AI for 特訓９９.
+Uses heuristic filter + parallel guided rollouts to pick the best move.
+Pure Rust/PyO3 backend via beam_core.
 
-CHECK_EVERY=1 pipeline: every frame is a beam step. No intermediate checking,
-no direction persistence, no short-circuit. Pure beam search every frame.
+Architecture:
+  1. Heuristic filter: 4 probe timesteps × 9 moves → rank by cumulative danger
+  2. Adaptive top-k: keep candidates within 5× of best score (1-3 candidates)
+  3. Parallel guided rollouts: low-τ softmax policy across candidates (rayon)
+  4. Pick the move with lowest average rollout danger
 
-Hot path (beam_search, score_pos, max_gap_move) runs in Rust via beam_core.
-Config: see algo_config.py
+Also available: UCB1 MCTS tree (mcts_ucb) — experimental, underperforms filter+rollout.
+
+Config: see algo_config.py (MCTS_* constants)
 """
 import numpy as np
-import sys, os
+import sys
+import os
 
 _BEAM_CORE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'beam_core')
 if os.path.isdir(_BEAM_CORE_DIR) and _BEAM_CORE_DIR not in sys.path:
     sys.path.insert(0, _BEAM_CORE_DIR)
 
-from beam_core import beam_search_py as _beam_search
+from beam_core import guided_mcts_score_py as _guided_mcts_score
+from beam_core import mcts_ucb_py as _mcts_ucb
+from beam_core import mcts_progressive_py as _mcts_progressive
 from beam_core import max_gap_move_py as _max_gap_move
 from beam_core import score_pos_py as _score_pos
-from beam_core import multi_beam_py as _multi_beam
 
 
-
-class BeamAI:
-    """Beam search AI with Rust/PyO3 backend."""
+class MctSAI:
+    """Progressive widening AI: heuristic filter + parallel guided rollouts."""
 
     def __init__(self, vel_table=None, accel_table=None):
         self.vel_table = np.array(vel_table or [(0, 0)], dtype=np.float32)
@@ -35,8 +42,8 @@ class BeamAI:
     def _config_kwargs(self):
         import hijack_tools.algo_config as c
         return dict(
-            beam_width=c.BEAM_WIDTH, beam_depth=c.BEAM_DEPTH,
-            check_every=c.CHECK_EVERY,
+            beam_depth=20, beam_width=c.BEAM_WIDTH,  # 20-frame sweet spot for guided rollouts
+            check_every=1,  # guided rollouts require step=1 (don't scale movement)
             danger_base=c.DANGER_BASE, safety_margin=c.SAFETY_MARGIN,
             wall_penalty=c.WALL_PENALTY, wall_margin=c.WALL_MARGIN,
             tw_base=c.TIME_WEIGHT_BASE, tw_rate=c.TIME_WEIGHT_RATE,
@@ -45,13 +52,13 @@ class BeamAI:
             partial_sort_enabled=c.PARTIAL_SORT_ENABLED,
             center_pull_enabled=c.CENTER_PULL_ENABLED,
             wall_penalty_enabled=c.WALL_PENALTY_ENABLED,
-            directional_weight=c.DIRECTIONAL_WEIGHT,
+            directional_weight=0.0,  # DW hurts MCTS (overreacts to moving bullets)
         )
 
     def _predict(self, bullets, px=0, py=0):
         import hijack_tools.algo_config as c
         n = len(bullets)
-        T = c.BEAM_DEPTH * c.CHECK_EVERY + 1
+        T = 21  # beam_depth=20 * check_every=1 + 1 (MCTS overrides global CE)
         if n == 0:
             return np.zeros((0, T, 2), dtype=np.float64)
 
@@ -94,11 +101,13 @@ class BeamAI:
                 timer = getattr(bullets[i], 'timer', 48)
                 if timer <= 0:
                     continue
-                cx = bx[i]; cy = by[i]
+                cx = bx[i]
+                cy = by[i]
                 cur_ang = ang[i]
                 for t in range(1, T):
                     if t % timer == 0:
-                        tdx = px - cx; tdy = py - cy
+                        tdx = px - cx
+                        tdy = py - cy
                         ang_rad = np.arctan2(tdy, tdx)
                         cur_ang = int(((ang_rad / (2 * np.pi) * 64) + 64.5) % 64)
                     idx = cur_ang & 63
@@ -110,18 +119,29 @@ class BeamAI:
         t2_mask = types == 2
         if t2_mask.any():
             for i in np.where(t2_mask)[0]:
-                cx = bx[i]; cy = by[i]
-                cvx = bullets[i].vx; cvy = bullets[i].vy
+                cx = bx[i]
+                cy = by[i]
+                cvx = bullets[i].vx
+                cvy = bullets[i].vy
                 for t in range(1, T):
-                    if cx < px: cvx += 1
-                    elif cx > px: cvx -= 1
-                    if cy < py: cvy += 1
-                    elif cy > py: cvy -= 1
-                    if cvx > 96: cvx = 96
-                    elif cvx < -96: cvx = -96
-                    if cvy > 96: cvy = 96
-                    elif cvy < -96: cvy = -96
-                    cx += cvx / 64.0; cy += cvy / 64.0
+                    if cx < px:
+                        cvx += 1
+                    elif cx > px:
+                        cvx -= 1
+                    if cy < py:
+                        cvy += 1
+                    elif cy > py:
+                        cvy -= 1
+                    if cvx > 96:
+                        cvx = 96
+                    elif cvx < -96:
+                        cvx = -96
+                    if cvy > 96:
+                        cvy = 96
+                    elif cvy < -96:
+                        cvy = -96
+                    cx += cvx / 64.0
+                    cy += cvy / 64.0
                     paths[i, t, 0] = cx
                     paths[i, t, 1] = cy
 
@@ -136,12 +156,15 @@ class BeamAI:
 
         paths = self._predict(bullets, px, py)
         kw = self._config_kwargs()
-        if c.MULTI_BEAM_ENABLED:
-            best = int(_multi_beam(float(px), float(py), paths, **kw))
-        else:
-            best = int(_beam_search(float(px), float(py), paths, **kw))
+        best = int(_mcts_progressive(
+            float(px), float(py), paths,
+            0, 0,  # filter_width, filter_depth (unused — heuristic filter is hardcoded)
+            c.MCTS_TOP_K, c.MCTS_ITERATIONS,
+            c.MCTS_TAU_START, c.MCTS_TAU_END,
+            c.MCTS_VERIFY_TAU, **kw,
+        )[0])
 
-        if best <= 0:
+        if best <= 0 or best > 8:
             bullets_arr = np.array([(b.x, b.y) for b in bullets], dtype=np.float64)
             best = _max_gap_move(float(px), float(py), bullets_arr)
         return int(c.BITS[max(best, 0) % len(c.BITS)])

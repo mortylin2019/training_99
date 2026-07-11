@@ -34,17 +34,18 @@ HIT_X1, HIT_X2 = 2.0, 13.0    # 11px wide
 HIT_Y1, HIT_Y2 = 0.0, 10.0    # 10px tall
 
 # ── Beam search parameters ─────────────────────────────────
-BEAM_DEPTH   = 120      # frames of lookahead (1.5 seconds at 80 FPS)
-BEAM_WIDTH   = 12       # top-K paths per depth
-CHECK_EVERY  = 1        # frames per beam step (1 = every frame, finest control)
+BEAM_DEPTH   = 40       # frames of lookahead (0.5s — distant bullets negligible, ≥10 == ≥120)
+BEAM_WIDTH   = 12       # top-K paths per depth (12 = proven optimal, experiment_log)
+CHECK_EVERY  = 4        # frames per beam step (4 = proven optimal, experiment_log §final)
 
 # ── Scoring weights ────────────────────────────────────────
 COLLISION_VAL = 1e8          # fatal: in hitbox = instant discard
-DANGER_BASE   = 2000.0       # inverse-square danger per bullet
+DANGER_BASE   = 3000.0       # inverse-square danger per bullet (3000 > 2000: more cautious)
 SAFETY_MARGIN = 2.0          # extra px clearance around hitbox
+DIRECTIONAL_WEIGHT = 1.0     # extra danger for bullets moving toward player (0=off)
 CENTER_PULL   = 0.3          # hardcoded in _score_pos — do not change
 WALL_PENALTY  = 5000.0       # penalty for being near screen edge
-WALL_MARGIN   = 40.0         # px from edge where penalty starts (early warning)
+WALL_MARGIN   = 20.0         # px from edge where penalty starts (20 > 40: less wall-avoidance, more dodging)
 
 # ── Time weighting (uniform — all frames equal) ────────────
 TIME_WEIGHT_BASE = 0.5       # w = 1 / (base + t * rate)
@@ -59,7 +60,14 @@ USE_TYPE_PREDICTION = False  # True = per-type physics (homing re-aim, accel, st
 # When True:  Type 1 re-aims toward (px,py), Type 2 steers, Type 3 uses ACCEL_TABLE.
 # False is faster and simpler; True adds accuracy at cost of Python for-loops per frame.
 
+# ── MCTS parameters (used by ai_mcts.py) ─────────────────────
+MCTS_ITERATIONS      = 500      # total guided-rollout iterations across candidates
+MCTS_TOP_K           = 3        # max candidates from heuristic filter
+MCTS_TAU_START       = 5.0      # annealing start temperature (exploration)
+MCTS_TAU_END         = 0.5      # annealing end temperature (exploitation)
+MCTS_VERIFY_TAU      = 0.3      # low temperature for candidate verification rollouts
 # ── Scoring toggles ────────────────────────────────────────
+MULTI_BEAM_ENABLED   = True     # 9 parallel beams, each locked to different first move
 EARLY_EXIT_ENABLED  = True     # stop bullet loop when candidate can't win
 EARLY_EXIT_BUFFER   = 50000    # safety margin for early exit (max bullet danger)
 PARTIAL_SORT_ENABLED = True    # insertion-based top-K vs np.argsort

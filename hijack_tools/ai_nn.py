@@ -2,7 +2,6 @@
 ai_nn.py — Neural Network guided AI players.
 
 NNGreedyAI:  Direct NN policy → move (72% acc, <1ms/frame).
-NNMCTSAI:   Depth-1 batched MCTS with NN value + UCT (robust, ~3ms/frame).
 NNFallbackAI: NN safety net over beam search (best of both, ~10ms/frame).
 
 Model: DeepSet attention-pooling + BatchNorm trunk → 9-way policy + survival value.
@@ -387,8 +386,7 @@ if __name__ == "__main__":
 
     fake_bullets = [FakeBullet(152 + i*5, 112 + i*3, i) for i in range(30)]
 
-    for name, cls in [("Greedy", NNGreedyAI), ("MCTS", NNMCTSAI),
-                       ("Fallback", NNFallbackAI)]:
+    for name, cls in [("Greedy", NNGreedyAI), ("Fallback", NNFallbackAI)]:
         try:
             if cls == NNFallbackAI:
                 ai = cls()

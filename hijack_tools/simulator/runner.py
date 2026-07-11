@@ -40,7 +40,11 @@ def _load_ai(name):
         try: from ai_nn import SmoothBeamAI
         except ImportError: from hijack_tools.ai_nn import SmoothBeamAI
         return SmoothBeamAI
-    raise ValueError(f"Unknown AI: {name}. Choices: ai_beam, ai_basic, ai_nn, ai_nn_greedy, ai_smooth")
+    if name == "ai_mcts":
+        try: from ai_mcts import MctSAI
+        except ImportError: from hijack_tools.ai_mcts import MctSAI
+        return MctSAI
+    raise ValueError(f"Unknown AI: {name}. Choices: ai_beam, ai_basic, ai_nn, ai_nn_greedy, ai_smooth, ai_mcts")
 
 
 def _run_one(args):

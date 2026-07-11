@@ -1,7 +1,7 @@
 [package]
 name = "beam_core"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [lib]
 name = "beam_core"
@@ -10,3 +10,4 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = { version = "0.29", features = ["extension-module"] }
 numpy = "0.29"
+rayon = "1.10"
