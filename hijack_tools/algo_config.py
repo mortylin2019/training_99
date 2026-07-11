@@ -66,9 +66,9 @@ HIT_Y1, HIT_Y2 = 0.0, 10.0    # 10px tall
 #
 # Python path (no C DLL): CHECK_EVERY=4, DEPTH=40
 # C engine path:          CHECK_EVERY=1, DEPTH=160
-BEAM_DEPTH   = 20       # 80 frames lookahead at CHECK_EVERY=4
+BEAM_DEPTH   = 80       # 80 frames lookahead at CHECK_EVERY=4
 BEAM_WIDTH   = 50  # wide beam preserves escape paths       # wider beam preserves escape paths through early pruning
-CHECK_EVERY  = 4        # frames per beam step
+CHECK_EVERY  = 1        # frames per beam step
 
 # ── Scoring weights ────────────────────────────────────────
 COLLISION_VAL = 1e8          # fatal: in hitbox = instant discard
@@ -86,3 +86,11 @@ TIME_WEIGHT_RATE = 0.03      # farther future = lower weight
 
 USE_SAFETY_MARGIN = True     # extra clearance around hitbox
 USE_MC_SEARCH = False        # Monte Carlo depth-first sampling
+
+# ── Performance toggles (disable if degraded, enable for speed) ──
+SHORTCUT_ENABLED    = True     # skip beam when safe (>SC_DIST px, not near wall)
+SHORTCUT_DISTANCE   = 160      # px — nearest bullet must be beyond this
+EARLY_EXIT_ENABLED  = True     # skip bullet check when candidate can't win
+EARLY_EXIT_BUFFER   = 50000    # safety margin for early exit (max bullet danger)
+PARTIAL_SORT_ENABLED = True    # insertion-based top-K vs np.argsort
+FAST_COLLISION_ENABLED = True  # collision-only intermediate frame check

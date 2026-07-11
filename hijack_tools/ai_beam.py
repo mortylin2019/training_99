@@ -64,6 +64,9 @@ try:
         CENTER_PULL, WALL_PENALTY, WALL_MARGIN,
         HIT_X1, HIT_X2, HIT_Y1, HIT_Y2,
         TIME_WEIGHT_BASE, TIME_WEIGHT_RATE,
+        SHORTCUT_ENABLED, SHORTCUT_DISTANCE,
+        EARLY_EXIT_ENABLED, EARLY_EXIT_BUFFER,
+        PARTIAL_SORT_ENABLED, FAST_COLLISION_ENABLED,
     )
 except ImportError:
     from hijack_tools.algo_config import (
@@ -75,11 +78,20 @@ except ImportError:
         CENTER_PULL, WALL_PENALTY, WALL_MARGIN,
         HIT_X1, HIT_X2, HIT_Y1, HIT_Y2,
         TIME_WEIGHT_BASE, TIME_WEIGHT_RATE,
+        SHORTCUT_ENABLED, SHORTCUT_DISTANCE,
+        EARLY_EXIT_ENABLED, EARLY_EXIT_BUFFER,
+        PARTIAL_SORT_ENABLED, FAST_COLLISION_ENABLED,
     )
 
 # Convert to numpy arrays for numba JIT
 MOVES = np.array(MOVES, dtype=np.int32)
 BITS = np.array(BITS, dtype=np.int32)
+
+# Optimization toggles (captured at import for JIT compile-time constants)
+_USE_PARTIAL_SORT = PARTIAL_SORT_ENABLED
+_USE_FAST_COLLISION = FAST_COLLISION_ENABLED
+_USE_EARLY_EXIT = EARLY_EXIT_ENABLED
+_EBUF = EARLY_EXIT_BUFFER
 
 # Compute effective margins based on toggles
 _EFF_MARGIN = SAFETY_MARGIN  # always enabled in Python beam
@@ -110,13 +122,11 @@ def _score_pos(px, py, bullets_t):
 
 
 @njit(cache=True)
-def _score_pos_early_exit(px, py, bullets_t, best_so_far):
+def _score_pos_early_exit(px, py, bullets_t, best_so_far, buffer):
     """Scoring with early termination — stops when candidate can't win.
 
-    Computes wall penalty + center pull FIRST so the early-exit comparison
-    is against the FULL accumulated score. Buffer of 50000 ensures only
-    truly hopeless candidates are discarded (max possible bullet danger
-    from remaining bullets is ~30000, so +50000 = mathematically safe).
+    Computes wall penalty + center pull FIRST. Uses buffer to guarantee
+    mathematically safe pruning (default 50000 covers 100 bullets at min distance).
     """
     B = bullets_t.shape[0]
     danger = 0.0
@@ -137,8 +147,8 @@ def _score_pos_early_exit(px, py, bullets_t, best_so_far):
         d2 = dx * dx + dy * dy
         if d2 < 4.0: d2 = 4.0
         danger += DANGER_BASE / d2
-        if danger + wall_ctr > best_so_far + 50000.0:
-            return danger + wall_ctr + 100000.0, False
+        if danger + wall_ctr > best_so_far + buffer:
+            return danger + wall_ctr + buffer * 2, False
 
     return danger + wall_ctr, False
 
@@ -210,15 +220,25 @@ def _beam_search(px0, py0, paths):
                         if mid_x > SCR_W: mid_x = float(SCR_W)
                         if mid_y < 0.0: mid_y = 0.0
                         if mid_y > SCR_H: mid_y = float(SCR_H)
-                        if _check_collision(mid_x, mid_y, bullets_sub):
-                            fatal_intermediate = True
-                            break
+                        if _USE_FAST_COLLISION:
+                            if _check_collision(mid_x, mid_y, bullets_sub):
+                                fatal_intermediate = True
+                                break
+                        else:
+                            _, fatal = _score_pos(mid_x, mid_y, bullets_sub)
+                            if fatal:
+                                fatal_intermediate = True
+                                break
 
                 if fatal_intermediate:
                     continue
 
-                # Score with early termination: skip bullets once danger > worst_beam
-                s, fatal = _score_pos_early_exit(nx, ny, bullets_t, worst_beam)
+                s = 0.0
+                fatal = False
+                if _USE_EARLY_EXIT:
+                    s, fatal = _score_pos_early_exit(nx, ny, bullets_t, worst_beam, _EBUF)
+                else:
+                    s, fatal = _score_pos(nx, ny, bullets_t)
                 if fatal: s += 1e9
                 w = 1.0 / (TIME_WEIGHT_BASE + t * TIME_WEIGHT_RATE)
                 tb = ((int(nx * 7919) ^ int(ny * 6271)) & 0xFFF) * 1e-6
@@ -230,30 +250,40 @@ def _beam_search(px0, py0, paths):
                 cand_score[ci] = total
                 ci += 1
 
-        # Partial top-K selection (insertion sort, O(N*K) vs O(N log N))
-        for k in range(K):
-            top_k[k] = -1
-            top_score[k] = 1e30
-        for i in range(ci):
-            score = cand_score[i]
+        # Top-K selection (partial insert sort or full argsort)
+        if _USE_PARTIAL_SORT:
             for k in range(K):
-                if score < top_score[k]:
-                    for j in range(K - 1, k, -1):
-                        top_k[j] = top_k[j - 1]
-                        top_score[j] = top_score[j - 1]
-                    top_k[k] = i
-                    top_score[k] = score
-                    break
-
-        nc = 0
-        for k in range(K):
-            if top_k[k] < 0: break
-            idx = top_k[k]
-            beam_px[nc] = cand_px[idx]
-            beam_py[nc] = cand_py[idx]
-            beam_first[nc] = cand_first[idx]
-            beam_score[nc] = cand_score[idx]
-            nc += 1
+                top_k[k] = -1
+                top_score[k] = 1e30
+            for i in range(ci):
+                score = cand_score[i]
+                for k in range(K):
+                    if score < top_score[k]:
+                        for j in range(K - 1, k, -1):
+                            top_k[j] = top_k[j - 1]
+                            top_score[j] = top_score[j - 1]
+                        top_k[k] = i
+                        top_score[k] = score
+                        break
+            nc = 0
+            for k in range(K):
+                if top_k[k] < 0: break
+                idx = top_k[k]
+                beam_px[nc] = cand_px[idx]
+                beam_py[nc] = cand_py[idx]
+                beam_first[nc] = cand_first[idx]
+                beam_score[nc] = cand_score[idx]
+                nc += 1
+        else:
+            top_k = np.argsort(cand_score[:ci])[:K]
+            nc = 0
+            for ki in range(min(K, len(top_k))):
+                idx = top_k[ki]
+                beam_px[nc] = cand_px[idx]
+                beam_py[nc] = cand_py[idx]
+                beam_first[nc] = cand_first[idx]
+                beam_score[nc] = cand_score[idx]
+                nc += 1
         beam_count = nc
 
     return beam_first[0]
@@ -367,8 +397,10 @@ class BeamAI:
             d2 = (b.x - px)**2 + (b.y - py)**2
             if d2 < nearest_d2:
                 nearest_d2 = d2
-        near_wall = (px < 40 or px > 264 or py < 40 or py > 184)
-        if nearest_d2 > 6400 and not near_wall:  # 80^2 = 6400
+        near_wall = (px < WALL_MARGIN or px > SCR_W - WALL_MARGIN
+                     or py < WALL_MARGIN or py > SCR_H - WALL_MARGIN)
+        shortcut_dist2 = SHORTCUT_DISTANCE * SHORTCUT_DISTANCE
+        if SHORTCUT_ENABLED and nearest_d2 > shortcut_dist2 and not near_wall:
             # Fast repulsion: sum force vectors, pick closest discrete move
             fx = fy = 0.0
             for b in bullets:
