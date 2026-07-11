@@ -43,7 +43,7 @@ class MctSAI:
         import hijack_tools.algo_config as c
         return dict(
             beam_depth=20, beam_width=c.BEAM_WIDTH,  # 20-frame sweet spot for guided rollouts
-            check_every=1,  # guided rollouts require step=1 (don't scale movement)
+            check_every=1,  # fine-grained stepping essential for softmax quality
             danger_base=c.DANGER_BASE, safety_margin=c.SAFETY_MARGIN,
             wall_penalty=c.WALL_PENALTY, wall_margin=c.WALL_MARGIN,
             tw_base=c.TIME_WEIGHT_BASE, tw_rate=c.TIME_WEIGHT_RATE,
@@ -58,7 +58,7 @@ class MctSAI:
     def _predict(self, bullets, px=0, py=0):
         import hijack_tools.algo_config as c
         n = len(bullets)
-        T = 21  # beam_depth=20 * check_every=1 + 1 (MCTS overrides global CE)
+        T = 21  # beam_depth=20 + 1, each timestep covers check_every=4 real frames
         if n == 0:
             return np.zeros((0, T, 2), dtype=np.float64)
 
@@ -68,7 +68,7 @@ class MctSAI:
         ang = np.array([b.angle_index for b in bullets], dtype=np.int32)
 
         vel = self._velocity(ang)
-        ts = np.arange(T, dtype=np.float64)
+        ts = np.arange(T, dtype=np.float64)  # CE=1: paths[t] = bullet at real frame t
         paths = np.zeros((n, T, 2), dtype=np.float64)
         paths[:, :, 0] = bx[:, None] + vel[:, 0, None] * ts[None, :]
         paths[:, :, 1] = by[:, None] + vel[:, 1, None] * ts[None, :]

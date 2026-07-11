@@ -600,12 +600,13 @@ fn guided_rollout_score(px0: f64, py0: f64, first_move: usize, paths: ArrayView3
     let depth = cfg.beam_depth.min(t_total - 1);
     let depth_f = depth as f64;
     let n_bullets = paths.shape()[0];
+    let step = cfg.check_every.max(1) as f64;
     let mut vel_data: Vec<f64> = if cfg.directional_weight > 0.0 {
         vec![0.0; n_bullets * 2]
     } else { vec![] };
     let mut rng = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-    let mut cx = px0 + MOVES[first_move][0];
-    let mut cy = py0 + MOVES[first_move][1];
+    let mut cx = px0 + MOVES[first_move][0] * step;
+    let mut cy = py0 + MOVES[first_move][1] * step;
     if cx < 0.0 { cx = 0.0; } if cx > cfg.scr_w { cx = cfg.scr_w; }
     if cy < 0.0 { cy = 0.0; } if cy > cfg.scr_h { cy = cfg.scr_h; }
 
@@ -645,7 +646,7 @@ fn guided_rollout_score(px0: f64, py0: f64, first_move: usize, paths: ArrayView3
         let mut scores = [0.0f64; 9];
         let mut min_s = f64::MAX;
         for mi in 0..9 {
-            let mut nx = cx + MOVES[mi][0]; let mut ny = cy + MOVES[mi][1];
+            let mut nx = cx + MOVES[mi][0] * step; let mut ny = cy + MOVES[mi][1] * step;
             if nx < 0.0 { nx = 0.0; } if nx > cfg.scr_w { nx = cfg.scr_w; }
             if ny < 0.0 { ny = 0.0; } if ny > cfg.scr_h { ny = cfg.scr_h; }
             if mi == 0 || min_s >= 1e20 {
@@ -667,7 +668,7 @@ fn guided_rollout_score(px0: f64, py0: f64, first_move: usize, paths: ArrayView3
         let r = (rng as f64 / u64::MAX as f64) * total_w;
         let mut cum = 0.0; let mut pick = 0usize;
         for mi in 0..9 { cum += weights[mi]; if r <= cum { pick = mi; break; } }
-        cx += MOVES[pick][0]; cy += MOVES[pick][1];
+        cx += MOVES[pick][0] * step; cy += MOVES[pick][1] * step;
     }
     total_danger
 }
@@ -808,6 +809,7 @@ fn mcts_progressive(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
                     top_k: usize, iterations: usize,
                     tau_start: f64, tau_end: f64, verify_tau: f64) -> (i32, Vec<f64>) {
     let t_total = paths.shape()[1];
+    let filter_step = cfg.check_every.max(1) as f64;
     let probe_ts = [1usize, 5, 10, 20];
     let mut move_scores: Vec<(usize, f64)> = Vec::with_capacity(9);
     for mi in 0..9 {
@@ -816,8 +818,8 @@ fn mcts_progressive(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
         let mut total = 0.0;
         for &t in &probe_ts {
             if t >= t_total { break; }
-            let mut nx = px0 + dx * t as f64;
-            let mut ny = py0 + dy * t as f64;
+            let mut nx = px0 + dx * t as f64 * filter_step;
+            let mut ny = py0 + dy * t as f64 * filter_step;
             if nx < 0.0 { nx = 0.0; } if nx > cfg.scr_w { nx = cfg.scr_w; }
             if ny < 0.0 { ny = 0.0; } if ny > cfg.scr_h { ny = cfg.scr_h; }
             let bt = paths.index_axis(Axis(1), t);
@@ -844,8 +846,9 @@ fn mcts_progressive(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
     let per_move = (iterations / top.len().max(1)).max(3);
 
     let results: Vec<(usize, f64)> = top.par_iter().map(|&mi| {
-        let mut nx = px0 + MOVES[mi][0];
-        let mut ny = py0 + MOVES[mi][1];
+        let step = cfg.check_every.max(1) as f64;
+        let mut nx = px0 + MOVES[mi][0] * step;
+        let mut ny = py0 + MOVES[mi][1] * step;
         if nx < 0.0 { nx = 0.0; } if nx > cfg.scr_w { nx = cfg.scr_w; }
         if ny < 0.0 { ny = 0.0; } if ny > cfg.scr_h { ny = cfg.scr_h; }
 

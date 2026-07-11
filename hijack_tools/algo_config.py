@@ -61,7 +61,7 @@ USE_TYPE_PREDICTION = False  # True = per-type physics (homing re-aim, accel, st
 # False is faster and simpler; True adds accuracy at cost of Python for-loops per frame.
 
 # ── MCTS parameters (used by ai_mcts.py) ─────────────────────
-MCTS_ITERATIONS      = 500      # total guided-rollout iterations across candidates
+MCTS_ITERATIONS      = 1000     # total guided-rollout iterations across candidates
 MCTS_TOP_K           = 3        # max candidates from heuristic filter
 MCTS_TAU_START       = 5.0      # annealing start temperature (exploration)
 MCTS_TAU_END         = 0.5      # annealing end temperature (exploitation)
