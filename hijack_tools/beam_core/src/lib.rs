@@ -22,7 +22,7 @@ struct Cfg {
 impl Default for Cfg {
     fn default() -> Self {
         Cfg {
-            beam_width: 200, beam_depth: 40, check_every: 4, speed: 1.0,
+            beam_width: 25, beam_depth: 40, check_every: 4, speed: 1.0,
             scr_w: 304.0, scr_h: 224.0, ctr_x: 152.0, ctr_y: 112.0,
             danger_base: 3000.0, safety_margin: 2.0,
             wall_penalty: 5000.0, wall_margin: 20.0,
@@ -58,7 +58,7 @@ impl Cfg {
 /// Build 1/d² lookup table. Covers all realistic d2 values from beam search
 /// (bullet path extrapolation can exceed screen bounds). 2M entries ≈ 16 MB.
 fn build_recip_table(cfg: &Cfg) -> Vec<f64> {
-    let max_d2 = 4_000_000usize;
+    let max_d2 = 500_000usize;
     let mut table = vec![0.0f64; max_d2 + 1];
     for d2 in 0..=max_d2 {
         table[d2] = cfg.danger_base / (d2 as f64).max(4.0);
@@ -212,29 +212,30 @@ fn beam_search(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
             }
         }
 
-        // Phase 2: Score all candidates in parallel
+        // Phase 2: Score all candidates (sequential)
         let early = cfg.early_exit_enabled;
         let buf = cfg.early_exit_buffer;
         let w = 1.0 / (cfg.tw_base + t as f64 * cfg.tw_rate);
-        let scores: Vec<(f64, i32, f64, f64)> = (0..ci).into_par_iter().map(|i| {
-            let nx = cand_nx[i]; let ny = cand_ny[i];
-            let parent = cand_parent[i]; let first = cand_first[i];
+        let mut c_score = vec![0.0f64; ci];
+        let mut c_first_vec = vec![0i32; ci];
+        for i in 0..ci {
             let (s, fatal) = if early {
-                score_pos_early_exit(nx, ny, bullets_t, vel_opt, worst_beam, buf, cfg, recip)
+                score_pos_early_exit(cand_nx[i], cand_ny[i], bullets_t, vel_opt, worst_beam, buf, cfg, recip)
             } else {
-                score_pos(nx, ny, bullets_t, vel_opt, cfg, recip)
+                score_pos(cand_nx[i], cand_ny[i], bullets_t, vel_opt, cfg, recip)
             };
             let s = if fatal { s + 1e9 } else { s };
-            let tb = (((nx * 7919.0) as u64 ^ (ny * 6271.0) as u64) & 0xFFF) as f64 * 1e-6;
-            (parent + s * w + tb, first, nx, ny)
-        }).collect();
+            let tb = (((cand_nx[i] * 7919.0) as u64 ^ (cand_ny[i] * 6271.0) as u64) & 0xFFF) as f64 * 1e-6;
+            c_score[i] = cand_parent[i] + s * w + tb;
+            c_first_vec[i] = cand_first[i];
+        }
 
         // Phase 3: Top-K selection (sequential)
         if cfg.partial_sort_enabled {
             let mut top_k = vec![-1i32; k];
             let mut top_score = vec![1e30f64; k];
             for i in 0..ci {
-                let score = scores[i].0;
+                let score = c_score[i];
                 for ki in 0..k {
                     if score < top_score[ki] {
                         for j in (ki + 1..k).rev() { top_k[j] = top_k[j - 1]; top_score[j] = top_score[j - 1]; }
@@ -247,19 +248,19 @@ fn beam_search(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
             for ki in 0..k {
                 if top_k[ki] < 0 { break; }
                 let idx = top_k[ki] as usize;
-                b_px[nc] = scores[idx].2; b_py[nc] = scores[idx].3;
-                b_first[nc] = scores[idx].1; b_score[nc] = scores[idx].0;
+                b_px[nc] = cand_nx[idx]; b_py[nc] = cand_ny[idx];
+                b_first[nc] = c_first_vec[idx]; b_score[nc] = c_score[idx];
                 nc += 1;
             }
             b_cnt = nc;
         } else {
             let mut indices: Vec<usize> = (0..ci).collect();
-            indices.sort_by(|&a, &b| scores[a].0.partial_cmp(&scores[b].0).unwrap());
+            indices.sort_by(|&a, &b| c_score[a].partial_cmp(&c_score[b]).unwrap());
             let limit = k.min(indices.len());
             for ki in 0..limit {
                 let idx = indices[ki];
-                b_px[ki] = scores[idx].2; b_py[ki] = scores[idx].3;
-                b_first[ki] = scores[idx].1; b_score[ki] = scores[idx].0;
+                b_px[ki] = cand_nx[idx]; b_py[ki] = cand_ny[idx];
+                b_first[ki] = c_first_vec[idx]; b_score[ki] = c_score[idx];
             }
             b_cnt = limit;
         }
