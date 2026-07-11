@@ -30,7 +30,7 @@ class GameSimulator:
         self.dead = False
 
         self.bullet_count = self.start_bullets
-        self.next_spawn = 0                # immediate first spawn (C: DAT_00406dfc = 0)
+        self.next_spawn = self._spawn_interval  # C: DAT_00406dfc = G_GameStartTime + 3000
         self.next_pattern = PATTERN_CHECK  # first pattern check in 5s
         self.pattern = 0
         self.bounce_limit = 0
