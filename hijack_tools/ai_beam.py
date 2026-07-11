@@ -456,6 +456,28 @@ class BeamAI:
                     paths[i, t, 0] = cx
                     paths[i, t, 1] = cy
 
+        # Type 2 (H-Accel): frame-by-frame steering toward player.
+        # Each frame, vx/vy adjust ±1 toward (px, py), clamped to ±96.
+        t2_mask = types == 2
+        if t2_mask.any():
+            for i in np.where(t2_mask)[0]:
+                cx = bx[i]; cy = by[i]
+                cvx = bullets[i].vx; cvy = bullets[i].vy  # raw internal units
+                for t in range(1, T):
+                    # Steer toward player
+                    if cx < px: cvx += 1
+                    elif cx > px: cvx -= 1
+                    if cy < py: cvy += 1
+                    elif cy > py: cvy -= 1
+                    # Clamp to ±96
+                    if cvx > 96: cvx = 96
+                    elif cvx < -96: cvx = -96
+                    if cvy > 96: cvy = 96
+                    elif cvy < -96: cvy = -96
+                    cx += cvx / 64.0; cy += cvy / 64.0
+                    paths[i, t, 0] = cx
+                    paths[i, t, 1] = cy
+
         return paths
 
     def decide(self, px, py, bullets):
