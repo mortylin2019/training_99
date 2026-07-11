@@ -67,6 +67,7 @@ try:
         SHORTCUT_ENABLED, SHORTCUT_DISTANCE,
         EARLY_EXIT_ENABLED, EARLY_EXIT_BUFFER,
         PARTIAL_SORT_ENABLED, FAST_COLLISION_ENABLED,
+        CENTER_PULL_ENABLED, WALL_PENALTY_ENABLED,
     )
 except ImportError:
     from hijack_tools.algo_config import (
@@ -81,6 +82,7 @@ except ImportError:
         SHORTCUT_ENABLED, SHORTCUT_DISTANCE,
         EARLY_EXIT_ENABLED, EARLY_EXIT_BUFFER,
         PARTIAL_SORT_ENABLED, FAST_COLLISION_ENABLED,
+        CENTER_PULL_ENABLED, WALL_PENALTY_ENABLED,
     )
 
 # Convert to numpy arrays for numba JIT
@@ -92,6 +94,8 @@ _USE_PARTIAL_SORT = PARTIAL_SORT_ENABLED
 _USE_FAST_COLLISION = FAST_COLLISION_ENABLED
 _USE_EARLY_EXIT = EARLY_EXIT_ENABLED
 _EBUF = EARLY_EXIT_BUFFER
+_USE_CENTER = CENTER_PULL_ENABLED
+_USE_WALL = WALL_PENALTY_ENABLED
 
 # Compute effective margins based on toggles
 _EFF_MARGIN = SAFETY_MARGIN  # always enabled in Python beam
@@ -112,12 +116,14 @@ def _score_pos(px, py, bullets_t):
         d2 = dx * dx + dy * dy
         if d2 < 4.0: d2 = 4.0
         danger += DANGER_BASE / d2
-    danger += abs(px - CTR_X) * 0.3
-    danger += abs(py - CTR_Y) * 0.3
-    if px < WALL_MARGIN: danger += (WALL_MARGIN - px) * WALL_PENALTY
-    elif px > SCR_W - WALL_MARGIN: danger += (px - (SCR_W - WALL_MARGIN)) * WALL_PENALTY
-    if py < WALL_MARGIN: danger += (WALL_MARGIN - py) * WALL_PENALTY
-    elif py > SCR_H - WALL_MARGIN: danger += (py - (SCR_H - WALL_MARGIN)) * WALL_PENALTY
+    if _USE_CENTER:
+        danger += abs(px - CTR_X) * 0.3
+        danger += abs(py - CTR_Y) * 0.3
+    if _USE_WALL:
+        if px < WALL_MARGIN: danger += (WALL_MARGIN - px) * WALL_PENALTY
+        elif px > SCR_W - WALL_MARGIN: danger += (px - (SCR_W - WALL_MARGIN)) * WALL_PENALTY
+        if py < WALL_MARGIN: danger += (WALL_MARGIN - py) * WALL_PENALTY
+        elif py > SCR_H - WALL_MARGIN: danger += (py - (SCR_H - WALL_MARGIN)) * WALL_PENALTY
     return danger, False
 
 
@@ -131,11 +137,14 @@ def _score_pos_early_exit(px, py, bullets_t, best_so_far, buffer):
     B = bullets_t.shape[0]
     danger = 0.0
 
-    wall_ctr = abs(px - CTR_X) * 0.3 + abs(py - CTR_Y) * 0.3
-    if px < WALL_MARGIN: wall_ctr += (WALL_MARGIN - px) * WALL_PENALTY
-    elif px > SCR_W - WALL_MARGIN: wall_ctr += (px - (SCR_W - WALL_MARGIN)) * WALL_PENALTY
-    if py < WALL_MARGIN: wall_ctr += (WALL_MARGIN - py) * WALL_PENALTY
-    elif py > SCR_H - WALL_MARGIN: wall_ctr += (py - (SCR_H - WALL_MARGIN)) * WALL_PENALTY
+    wall_ctr = 0.0
+    if _USE_CENTER:
+        wall_ctr += abs(px - CTR_X) * 0.3 + abs(py - CTR_Y) * 0.3
+    if _USE_WALL:
+        if px < WALL_MARGIN: wall_ctr += (WALL_MARGIN - px) * WALL_PENALTY
+        elif px > SCR_W - WALL_MARGIN: wall_ctr += (px - (SCR_W - WALL_MARGIN)) * WALL_PENALTY
+        if py < WALL_MARGIN: wall_ctr += (WALL_MARGIN - py) * WALL_PENALTY
+        elif py > SCR_H - WALL_MARGIN: wall_ctr += (py - (SCR_H - WALL_MARGIN)) * WALL_PENALTY
 
     for i in range(B):
         bx = bullets_t[i, 0]

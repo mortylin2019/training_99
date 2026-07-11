@@ -94,3 +94,5 @@ EARLY_EXIT_ENABLED  = True     # skip bullet check when candidate can't win
 EARLY_EXIT_BUFFER   = 50000    # safety margin for early exit (max bullet danger)
 PARTIAL_SORT_ENABLED = True    # insertion-based top-K vs np.argsort
 FAST_COLLISION_ENABLED = True  # collision-only intermediate frame check
+CENTER_PULL_ENABLED  = True    # gentle pull toward screen center (0.3 weight)
+WALL_PENALTY_ENABLED = True    # penalty for approaching screen edges

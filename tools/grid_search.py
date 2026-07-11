@@ -24,22 +24,28 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'hijack_tools')
 # Edit this to search different parameter ranges.
 # Each combo = cartesian product of all values.
 GRID = {
-    'BEAM_WIDTH':      [30, 40, 50],
-    'BEAM_DEPTH':      [16, 20],
-    'CHECK_EVERY':     [4, 5],
-    'SHORTCUT_DISTANCE': [120, 200, 0],   # 0 = disable shortcut
+    'BEAM_WIDTH':      [20, 30, 40, 50],
+    'BEAM_DEPTH':      [12, 16, 20],
+    'CHECK_EVERY':     [3, 4, 5, 6],
+    'DANGER_BASE':     [1000, 2000, 4000],
+    'WALL_MARGIN':     [20, 40, 60],
+    'SAFETY_MARGIN':   [0, 2, 4],
+    'SHORTCUT_DISTANCE': [120, 200, 0],
     'EARLY_EXIT_BUFFER': [10000, 50000],
     'EARLY_EXIT_ENABLED': [True, False],
     'PARTIAL_SORT_ENABLED': [True],
+    'CENTER_PULL_ENABLED': [True, False],
+    'WALL_PENALTY_ENABLED': [True, False],
 }
 
-# Quick mode — fewer combos
+# Quick mode — test the most impactful axes first
 GRID_QUICK = {
-    'BEAM_WIDTH':      [30, 50],
-    'BEAM_DEPTH':      [20],
-    'CHECK_EVERY':     [4],
+    'BEAM_WIDTH':      [20, 30, 50],
+    'BEAM_DEPTH':      [12, 20],
+    'CHECK_EVERY':     [4, 6],
+    'DANGER_BASE':     [1000, 2000],
     'SHORTCUT_DISTANCE': [120, 200],
-    'EARLY_EXIT_BUFFER': [10000, 50000],
+    'CENTER_PULL_ENABLED': [True, False],
 }
 
 
