@@ -39,14 +39,19 @@ def main():
                    help="0=Easy, 1=Normal, 2=Hard, 3=Lunatic")
     p.add_argument("--ai", default="ai_basic,ai_beam,ai_mcts")
     p.add_argument("--max-frames", type=int, default=40000)
+    p.add_argument("--beam-width", type=int, default=None,
+                   help="Override BEAM_WIDTH for ai_beam (default: use algo_config)")
     args = p.parse_args()
+    
+    if args.beam_width is not None:
+        cfg.BEAM_WIDTH = args.beam_width
 
     ai_names = [a.strip() for a in args.ai.split(",")]
     diff_name = {0: "Easy", 1: "Normal", 2: "Hard", 3: "Lunatic"}[args.difficulty]
 
     ai_map = {
         "ai_basic": ("BasicAI 1/r²", BasicAI),
-        "ai_beam": ("beam W=12 CE=4", BeamAI),
+        "ai_beam": (f"beam W={cfg.BEAM_WIDTH} CE=4", BeamAI),
         "ai_mcts": ("MCTS 1000iter", MctSAI),
     }
 

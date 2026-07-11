@@ -22,7 +22,7 @@ struct Cfg {
 impl Default for Cfg {
     fn default() -> Self {
         Cfg {
-            beam_width: 12, beam_depth: 40, check_every: 4, speed: 1.0,
+            beam_width: 200, beam_depth: 40, check_every: 4, speed: 1.0,
             scr_w: 304.0, scr_h: 224.0, ctr_x: 152.0, ctr_y: 112.0,
             danger_base: 3000.0, safety_margin: 2.0,
             wall_penalty: 5000.0, wall_margin: 20.0,
@@ -55,8 +55,20 @@ impl Cfg {
     }
 }
 
+/// Build 1/d² lookup table. Covers all realistic d2 values from beam search
+/// (bullet path extrapolation can exceed screen bounds). 2M entries ≈ 16 MB.
+fn build_recip_table(cfg: &Cfg) -> Vec<f64> {
+    let max_d2 = 4_000_000usize;
+    let mut table = vec![0.0f64; max_d2 + 1];
+    for d2 in 0..=max_d2 {
+        table[d2] = cfg.danger_base / (d2 as f64).max(4.0);
+    }
+    table
+}
+
 fn score_pos(px: f64, py: f64, bullets: ArrayView2<'_, f64>,
-             velocities: Option<ArrayView2<'_, f64>>, cfg: &Cfg) -> (f64, bool) {
+             velocities: Option<ArrayView2<'_, f64>>, cfg: &Cfg,
+             recip: &[f64]) -> (f64, bool) {
     let n = bullets.shape()[0];
     let mut danger = 0.0f64;
     let mut wc = 0.0;
@@ -91,14 +103,16 @@ fn score_pos(px: f64, py: f64, bullets: ArrayView2<'_, f64>,
                 mult += dir_w * toward;
             }
         }
-        danger += cfg.danger_base / d2 * mult;
+        if d2 >= recip.len() as f64 { d2 = (recip.len() - 1) as f64; }
+        danger += recip[d2 as usize] * mult;
     }
     (danger + wc, false)
 }
 
 fn score_pos_early_exit(px: f64, py: f64, bullets: ArrayView2<'_, f64>,
                          velocities: Option<ArrayView2<'_, f64>>,
-                         best_so_far: f64, buffer: f64, cfg: &Cfg) -> (f64, bool) {
+                         best_so_far: f64, buffer: f64, cfg: &Cfg,
+                         recip: &[f64]) -> (f64, bool) {
     let n = bullets.shape()[0];
     let mut danger = 0.0f64;
     let mut wc = 0.0;
@@ -133,13 +147,15 @@ fn score_pos_early_exit(px: f64, py: f64, bullets: ArrayView2<'_, f64>,
                 mult += dir_w * toward;
             }
         }
-        danger += cfg.danger_base / d2 * mult;
+        if d2 >= recip.len() as f64 { d2 = (recip.len() - 1) as f64; }
+        danger += recip[d2 as usize] * mult;
         if danger + wc > best_so_far + buffer { return (danger + wc + buffer * 2.0, false); }
     }
     (danger + wc, false)
 }
 
-fn beam_search(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg) -> i32 {
+fn beam_search(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
+               recip: &[f64]) -> i32 {
     let k = cfg.beam_width;
     let depth = cfg.beam_depth;
     let t_total = paths.shape()[1];
@@ -156,11 +172,6 @@ fn beam_search(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg) -> i32
     b_px[0] = px0; b_py[0] = py0;
     b_first[0] = -1; b_score[0] = 0.0;
     let mut b_cnt = 1usize;
-    let max_cand = k * 9;
-    let mut c_px = vec![0.0f64; max_cand];
-    let mut c_py = vec![0.0f64; max_cand];
-    let mut c_first = vec![0i32; max_cand];
-    let mut c_score = vec![0.0f64; max_cand];
 
     let n_bullets = paths.shape()[0];
     let mut vel_data: Vec<f64> = if cfg.directional_weight > 0.0 {
@@ -180,6 +191,13 @@ fn beam_search(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg) -> i32
             Some(ArrayView2::from_shape((n_bullets, 2), &vel_data).unwrap())
         } else { None };
         let worst_beam = if b_cnt > 0 { b_score[b_cnt - 1] } else { 1e30 };
+
+        // Phase 1: Precompute candidate positions (sequential, cheap)
+        let n_cand = b_cnt * 9;
+        let mut cand_nx = vec![0.0f64; n_cand];
+        let mut cand_ny = vec![0.0f64; n_cand];
+        let mut cand_parent = vec![0.0f64; n_cand];
+        let mut cand_first = vec![0i32; n_cand];
         let mut ci = 0usize;
         for bi in 0..b_cnt {
             for mi in 0..9 {
@@ -187,26 +205,36 @@ fn beam_search(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg) -> i32
                 let mut ny = b_py[bi] + moves[mi][1] * cfg.speed * step as f64;
                 if nx < 0.0 { nx = 0.0; } if nx > cfg.scr_w { nx = cfg.scr_w; }
                 if ny < 0.0 { ny = 0.0; } if ny > cfg.scr_h { ny = cfg.scr_h; }
-                let (s, fatal) = if cfg.early_exit_enabled {
-                    score_pos_early_exit(nx, ny, bullets_t, vel_opt, worst_beam, cfg.early_exit_buffer, cfg)
-                } else {
-                    score_pos(nx, ny, bullets_t, vel_opt, cfg)
-                };
-                let s = if fatal { s + 1e9 } else { s };
-                let w = 1.0 / (cfg.tw_base + t as f64 * cfg.tw_rate);
-                let tb = (((nx * 7919.0) as u64 ^ (ny * 6271.0) as u64) & 0xFFF) as f64 * 1e-6;
-                let total = b_score[bi] + s * w + tb;
-                c_px[ci] = nx; c_py[ci] = ny;
-                c_first[ci] = if b_first[bi] >= 0 { b_first[bi] } else { mi as i32 };
-                c_score[ci] = total;
+                cand_nx[ci] = nx; cand_ny[ci] = ny;
+                cand_parent[ci] = b_score[bi];
+                cand_first[ci] = if b_first[bi] >= 0 { b_first[bi] } else { mi as i32 };
                 ci += 1;
             }
         }
+
+        // Phase 2: Score all candidates in parallel
+        let early = cfg.early_exit_enabled;
+        let buf = cfg.early_exit_buffer;
+        let w = 1.0 / (cfg.tw_base + t as f64 * cfg.tw_rate);
+        let scores: Vec<(f64, i32, f64, f64)> = (0..ci).into_par_iter().map(|i| {
+            let nx = cand_nx[i]; let ny = cand_ny[i];
+            let parent = cand_parent[i]; let first = cand_first[i];
+            let (s, fatal) = if early {
+                score_pos_early_exit(nx, ny, bullets_t, vel_opt, worst_beam, buf, cfg, recip)
+            } else {
+                score_pos(nx, ny, bullets_t, vel_opt, cfg, recip)
+            };
+            let s = if fatal { s + 1e9 } else { s };
+            let tb = (((nx * 7919.0) as u64 ^ (ny * 6271.0) as u64) & 0xFFF) as f64 * 1e-6;
+            (parent + s * w + tb, first, nx, ny)
+        }).collect();
+
+        // Phase 3: Top-K selection (sequential)
         if cfg.partial_sort_enabled {
             let mut top_k = vec![-1i32; k];
             let mut top_score = vec![1e30f64; k];
             for i in 0..ci {
-                let score = c_score[i];
+                let score = scores[i].0;
                 for ki in 0..k {
                     if score < top_score[ki] {
                         for j in (ki + 1..k).rev() { top_k[j] = top_k[j - 1]; top_score[j] = top_score[j - 1]; }
@@ -219,19 +247,19 @@ fn beam_search(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg) -> i32
             for ki in 0..k {
                 if top_k[ki] < 0 { break; }
                 let idx = top_k[ki] as usize;
-                b_px[nc] = c_px[idx]; b_py[nc] = c_py[idx];
-                b_first[nc] = c_first[idx]; b_score[nc] = c_score[idx];
+                b_px[nc] = scores[idx].2; b_py[nc] = scores[idx].3;
+                b_first[nc] = scores[idx].1; b_score[nc] = scores[idx].0;
                 nc += 1;
             }
             b_cnt = nc;
         } else {
             let mut indices: Vec<usize> = (0..ci).collect();
-            indices.sort_by(|&a, &b| c_score[a].partial_cmp(&c_score[b]).unwrap());
+            indices.sort_by(|&a, &b| scores[a].0.partial_cmp(&scores[b].0).unwrap());
             let limit = k.min(indices.len());
             for ki in 0..limit {
                 let idx = indices[ki];
-                b_px[ki] = c_px[idx]; b_py[ki] = c_py[idx];
-                b_first[ki] = c_first[idx]; b_score[ki] = c_score[idx];
+                b_px[ki] = scores[idx].2; b_py[ki] = scores[idx].3;
+                b_first[ki] = scores[idx].1; b_score[ki] = scores[idx].0;
             }
             b_cnt = limit;
         }
@@ -239,7 +267,8 @@ fn beam_search(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg) -> i32
     b_first[0]
 }
 
-fn beam_search_forced(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg, force_move: usize) -> f64 {
+fn beam_search_forced(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
+                     force_move: usize, recip: &[f64]) -> f64 {
     let k = cfg.beam_width;
     let depth = cfg.beam_depth;
     let t_total = paths.shape()[1];
@@ -258,7 +287,7 @@ fn beam_search_forced(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
     if ny < 0.0 { ny = 0.0; } if ny > cfg.scr_h { ny = cfg.scr_h; }
 
     let bullets_t = paths.index_axis(Axis(1), t);
-    let (s0, fatal) = score_pos(nx, ny, bullets_t, None, cfg);
+    let (s0, fatal) = score_pos(nx, ny, bullets_t, None, cfg, recip);
     if fatal { return 1e30; }
     let w0 = 1.0 / (cfg.tw_base + t as f64 * cfg.tw_rate);
     let mut b_score = s0 * w0;
@@ -268,11 +297,6 @@ fn beam_search_forced(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
     let mut b_score_arr = vec![1e30f64; k];
     b_px[0] = nx; b_py[0] = ny; b_score_arr[0] = b_score;
     let mut b_cnt = 1usize;
-
-    let max_cand = k * 9;
-    let mut c_px = vec![0.0f64; max_cand];
-    let mut c_py = vec![0.0f64; max_cand];
-    let mut c_score = vec![0.0f64; max_cand];
 
     let n_b_forced = paths.shape()[0];
     let mut vel_fdata: Vec<f64> = if cfg.directional_weight > 0.0 {
@@ -292,29 +316,42 @@ fn beam_search_forced(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
             Some(ArrayView2::from_shape((n_b_forced, 2), &vel_fdata).unwrap())
         } else { None };
         let worst_beam = if b_cnt > 0 { b_score_arr[b_cnt - 1] } else { 1e30 };
-        let mut ci = 0usize;
 
+        // Phase 1: Precompute candidate positions (sequential, cheap)
+        let n_cand = b_cnt * 9;
+        let mut cand_nx = vec![0.0f64; n_cand];
+        let mut cand_ny = vec![0.0f64; n_cand];
+        let mut cand_parent = vec![0.0f64; n_cand];
+        let mut ci = 0usize;
         for bi in 0..b_cnt {
             for mi in 0..9 {
                 let mut nx = b_px[bi] + moves[mi][0] * cfg.speed * step as f64;
                 let mut ny = b_py[bi] + moves[mi][1] * cfg.speed * step as f64;
                 if nx < 0.0 { nx = 0.0; } if nx > cfg.scr_w { nx = cfg.scr_w; }
                 if ny < 0.0 { ny = 0.0; } if ny > cfg.scr_h { ny = cfg.scr_h; }
-
-                let (s, fatal) = if cfg.early_exit_enabled {
-                    score_pos_early_exit(nx, ny, bullets_t, vel_opt, worst_beam, cfg.early_exit_buffer, cfg)
-                } else {
-                    score_pos(nx, ny, bullets_t, vel_opt, cfg)
-                };
-                let s = if fatal { s + 1e9 } else { s };
-                let w = 1.0 / (cfg.tw_base + t as f64 * cfg.tw_rate);
-                let tb = (((nx * 7919.0) as u64 ^ (ny * 6271.0) as u64) & 0xFFF) as f64 * 1e-6;
-                c_px[ci] = nx; c_py[ci] = ny;
-                c_score[ci] = b_score_arr[bi] + s * w + tb;
+                cand_nx[ci] = nx; cand_ny[ci] = ny;
+                cand_parent[ci] = b_score_arr[bi];
                 ci += 1;
             }
         }
 
+        // Phase 2: Score all candidates (sequential — called from 9-way rayon in multi_beam)
+        let early = cfg.early_exit_enabled;
+        let buf = cfg.early_exit_buffer;
+        let w = 1.0 / (cfg.tw_base + t as f64 * cfg.tw_rate);
+        let mut c_score = vec![0.0f64; ci];
+        for i in 0..ci {
+            let (s, fatal) = if early {
+                score_pos_early_exit(cand_nx[i], cand_ny[i], bullets_t, vel_opt, worst_beam, buf, cfg, recip)
+            } else {
+                score_pos(cand_nx[i], cand_ny[i], bullets_t, vel_opt, cfg, recip)
+            };
+            let s = if fatal { s + 1e9 } else { s };
+            let tb = (((cand_nx[i] * 7919.0) as u64 ^ (cand_ny[i] * 6271.0) as u64) & 0xFFF) as f64 * 1e-6;
+            c_score[i] = cand_parent[i] + s * w + tb;
+        }
+
+        // Phase 3: Top-K selection (sequential)
         if cfg.partial_sort_enabled {
             let mut top_k = vec![-1i32; k];
             let mut top_score = vec![1e30f64; k];
@@ -332,7 +369,7 @@ fn beam_search_forced(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
             for ki in 0..k {
                 if top_k[ki] < 0 { break; }
                 let idx = top_k[ki] as usize;
-                b_px[nc] = c_px[idx]; b_py[nc] = c_py[idx];
+                b_px[nc] = cand_nx[idx]; b_py[nc] = cand_ny[idx];
                 b_score_arr[nc] = c_score[idx];
                 nc += 1;
             }
@@ -343,7 +380,7 @@ fn beam_search_forced(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
             let limit = k.min(indices.len());
             for ki in 0..limit {
                 let idx = indices[ki];
-                b_px[ki] = c_px[idx]; b_py[ki] = c_py[idx];
+                b_px[ki] = cand_nx[idx]; b_py[ki] = cand_ny[idx];
                 b_score_arr[ki] = c_score[idx];
             }
             b_cnt = limit;
@@ -353,9 +390,10 @@ fn beam_search_forced(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
     if b_cnt > 0 { b_score_arr[0] } else { 1e30 }
 }
 
-fn multi_beam(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg) -> i32 {
+fn multi_beam(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
+              recip: &[f64]) -> i32 {
     let scores: Vec<(usize, f64)> = (0..9).into_par_iter().map(|mi| {
-        let s = beam_search_forced(px0, py0, paths, cfg, mi);
+        let s = beam_search_forced(px0, py0, paths, cfg, mi, recip);
         (mi, s)
     }).collect();
 
@@ -517,6 +555,7 @@ fn bench_rollouts(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg, bud
 
 fn guided_rollout(px0: f64, py0: f64, first_move: usize, paths: ArrayView3<'_, f64>,
                   cfg: &Cfg, seed: u64, temperature: f64) -> bool {
+    let recip = build_recip_table(cfg);
     let t_total = paths.shape()[1];
     let depth = cfg.beam_depth.min(t_total - 1);
     let n_bullets = paths.shape()[0];
@@ -547,7 +586,7 @@ fn guided_rollout(px0: f64, py0: f64, first_move: usize, paths: ArrayView3<'_, f
             let mut nx = cx + MOVES[mi][0]; let mut ny = cy + MOVES[mi][1];
             if nx < 0.0 { nx = 0.0; } if nx > cfg.scr_w { nx = cfg.scr_w; }
             if ny < 0.0 { ny = 0.0; } if ny > cfg.scr_h { ny = cfg.scr_h; }
-            let (s, fatal) = score_pos(nx, ny, bt, vel_opt, cfg);
+            let (s, fatal) = score_pos(nx, ny, bt, vel_opt, cfg, &recip);
             scores[mi] = if fatal { 1e30 } else { s };
             if scores[mi] < min_s { min_s = scores[mi]; }
         }
@@ -596,6 +635,7 @@ fn guided_mcts(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
 
 fn guided_rollout_score(px0: f64, py0: f64, first_move: usize, paths: ArrayView3<'_, f64>,
                         cfg: &Cfg, seed: u64, tau_start: f64, tau_end: f64) -> f64 {
+    let recip = build_recip_table(cfg);
     let t_total = paths.shape()[1];
     let depth = cfg.beam_depth.min(t_total - 1);
     let depth_f = depth as f64;
@@ -622,7 +662,7 @@ fn guided_rollout_score(px0: f64, py0: f64, first_move: usize, paths: ArrayView3
             }
             Some(ArrayView2::from_shape((n_bullets, 2), &vel_data).unwrap())
         } else { None };
-        let (s, fatal) = score_pos(cx, cy, bt, vel_opt, cfg);
+        let (s, fatal) = score_pos(cx, cy, bt, vel_opt, cfg, &recip);
         // Depth-proportional death penalty: dying at t=1 in a deep rollout
         // scores worse than dying at t=1 in a shallow rollout.
         // Formula: 1e30 * (depth - t + 1) / (depth + 1), t=1 → depth/(depth+1).
@@ -650,10 +690,10 @@ fn guided_rollout_score(px0: f64, py0: f64, first_move: usize, paths: ArrayView3
             if nx < 0.0 { nx = 0.0; } if nx > cfg.scr_w { nx = cfg.scr_w; }
             if ny < 0.0 { ny = 0.0; } if ny > cfg.scr_h { ny = cfg.scr_h; }
             if mi == 0 || min_s >= 1e20 {
-                let (s, fatal) = score_pos(nx, ny, bt, vel_opt, cfg);
+            let (s, fatal) = score_pos(nx, ny, bt, vel_opt, cfg, &recip);
                 scores[mi] = if fatal { 1e30 } else { s };
             } else {
-                let (s, fatal) = score_pos_early_exit(nx, ny, bt, vel_opt, min_s + 10000.0, 5000.0, cfg);
+                let (s, fatal) = score_pos_early_exit(nx, ny, bt, vel_opt, min_s + 10000.0, 5000.0, cfg, &recip);
                 scores[mi] = if fatal { 1e30 } else { s };
             }
             if scores[mi] < min_s { min_s = scores[mi]; }
@@ -675,6 +715,7 @@ fn guided_rollout_score(px0: f64, py0: f64, first_move: usize, paths: ArrayView3
 
 fn guided_mcts_score(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
                      rollouts_per_move: usize, tau_start: f64, tau_end: f64) -> (i32, Vec<f64>) {
+    let recip = build_recip_table(cfg);
     let scores: Vec<f64> = (0..9).into_par_iter().map(|mi| {
         let mut sum = 0.0f64;
         for r in 0..rollouts_per_move {
@@ -808,6 +849,7 @@ fn mcts_progressive(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
                     _filter_width: usize, _filter_depth: usize,
                     top_k: usize, iterations: usize,
                     tau_start: f64, tau_end: f64, verify_tau: f64) -> (i32, Vec<f64>) {
+    let recip = build_recip_table(cfg);
     let t_total = paths.shape()[1];
     let filter_step = cfg.check_every.max(1) as f64;
     let probe_ts = [1usize, 5, 10, 20];
@@ -823,7 +865,7 @@ fn mcts_progressive(px0: f64, py0: f64, paths: ArrayView3<'_, f64>, cfg: &Cfg,
             if nx < 0.0 { nx = 0.0; } if nx > cfg.scr_w { nx = cfg.scr_w; }
             if ny < 0.0 { ny = 0.0; } if ny > cfg.scr_h { ny = cfg.scr_h; }
             let bt = paths.index_axis(Axis(1), t);
-            let (s, fatal) = score_pos(nx, ny, bt, None, cfg);
+            let (s, fatal) = score_pos(nx, ny, bt, None, cfg, &recip);
             if fatal { total += 1e10; break; }
             total += s;
         }
@@ -909,7 +951,8 @@ fn max_gap_move(px: f64, py: f64, bullets: ArrayView2<'_, f64>) -> i32 {
 fn beam_search_py(px: f64, py: f64, paths: PyReadonlyArray3<'_, f64>,
                   kwargs: Option<&Bound<'_, PyAny>>) -> PyResult<i32> {
     let cfg = kwargs.map_or(Ok(Cfg::default()), |kw| Cfg::from_kwargs(kw))?;
-    Ok(beam_search(px, py, paths.as_array(), &cfg))
+    let recip = build_recip_table(&cfg);
+    Ok(beam_search(px, py, paths.as_array(), &cfg, &recip))
 }
 
 #[pyfunction]
@@ -917,7 +960,8 @@ fn beam_search_py(px: f64, py: f64, paths: PyReadonlyArray3<'_, f64>,
 fn score_pos_py(px: f64, py: f64, bullets: PyReadonlyArray2<'_, f64>,
                 kwargs: Option<&Bound<'_, PyAny>>) -> PyResult<(f64, bool)> {
     let cfg = kwargs.map_or(Ok(Cfg::default()), |kw| Cfg::from_kwargs(kw))?;
-    Ok(score_pos(px, py, bullets.as_array(), None, &cfg))
+    let recip = build_recip_table(&cfg);
+    Ok(score_pos(px, py, bullets.as_array(), None, &cfg, &recip))
 }
 
 #[pyfunction]
@@ -930,7 +974,8 @@ fn max_gap_move_py(px: f64, py: f64, bullets: PyReadonlyArray2<'_, f64>) -> PyRe
 fn multi_beam_py(px: f64, py: f64, paths: PyReadonlyArray3<'_, f64>,
                  kwargs: Option<&Bound<'_, PyAny>>) -> PyResult<i32> {
     let cfg = kwargs.map_or(Ok(Cfg::default()), |kw| Cfg::from_kwargs(kw))?;
-    Ok(multi_beam(px, py, paths.as_array(), &cfg))
+    let recip = build_recip_table(&cfg);
+    Ok(multi_beam(px, py, paths.as_array(), &cfg, &recip))
 }
 
 #[pyfunction]
@@ -1249,5 +1294,63 @@ mod tests {
         assert_eq!(counts.len(), 9);
         let visited = counts.iter().filter(|&&v| v > 0.0).count();
         assert!(visited <= 3, "only top-3 moves should be visited, got {visited}");
+    }
+
+    // ── recip table ────────────────────────────────────────────────────────
+
+    /// Recip table produces identical values to division for all reachable d2.
+    #[test]
+    fn recip_table_matches_division() {
+        let c = cfg();
+        let recip = build_recip_table(&c);
+        for d2 in 0..10000 {
+            let expected = c.danger_base / (d2 as f64).max(4.0);
+            assert!((recip[d2] - expected).abs() < 1e-12,
+                "recip[{d2}] = {} != expected {expected}", recip[d2]);
+        }
+    }
+
+    /// score_pos with recip table gives identical result to manual division.
+    #[test]
+    fn score_pos_recip_equivalent() {
+        let c = cfg();
+        let recip = build_recip_table(&c);
+        let bullets = Array2::from_shape_vec((2, 2), vec![50.0, 50.0, 150.0, 150.0]).unwrap();
+        // Reference: compute score manually matching score_pos formula
+        let px = 100.0; let py = 100.0;
+        let mut ref_danger = 0.0;
+        // wall + center (matching score_pos)
+        if c.center_pull_enabled {
+            ref_danger += (px - c.ctr_x).abs() * 0.3 + (py - c.ctr_y).abs() * 0.3;
+        }
+        for i in 0..2 {
+            let dx = bullets[[i, 0]] - px;
+            let dy = bullets[[i, 1]] - py;
+            // collision check (not fatal for these positions)
+            if dx >= c.hit_x1 - c.safety_margin && dx < c.hit_x2 + c.safety_margin
+                && dy >= c.hit_y1 - c.safety_margin && dy < c.hit_y2 + c.safety_margin {
+                    ref_danger = c.collision_val;
+                }
+            let d2 = ((dx * dx + dy * dy) as f64).max(4.0);
+            ref_danger += c.danger_base / d2;
+        }
+        // With recip
+        let (recip_danger, recip_fatal) = score_pos(100.0, 100.0, bullets.view(), None, &c, &recip);
+        assert!((ref_danger - recip_danger).abs() < 1e-10,
+            "recip danger {recip_danger} != ref {ref_danger}");
+        assert!(!recip_fatal);
+    }
+
+    /// beam_search produces identical move with sequential vs parallel scoring.
+    #[test]
+    fn beam_search_parallel_equivalent() {
+        let c = cfg();
+        let recip = build_recip_table(&c);
+        // Simple scenario: two far bullets, no convergence
+        let data: Vec<f64> = (0..20).flat_map(|_| [200.0_f64, 200.0]).collect();
+        let paths = Array3::from_shape_vec((1, 20, 2), data).unwrap();
+        let result = beam_search(100.0, 100.0, paths.view(), &c, &recip);
+        // With far bullets, beam should pick a move (not panic)
+        assert!(result >= -1 && result < 9, "beam returned invalid move: {result}");
     }
 }

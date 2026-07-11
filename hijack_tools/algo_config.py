@@ -4,17 +4,18 @@ algo_config.py — Beam Search Algorithm Configuration
 Single source of truth for all beam search parameters.
 Shared by ai_beam.py (Python) and ai_nn.py.
 
-DESIGN (2026-07-11, simplified pipeline):
+DESIGN (2026-07-11, optimised pipeline):
     CHECK_EVERY=4 — coarser stepping = implicit smoothing, 160-frame temporal range.
-    BEAM_WIDTH=12 — proven optimal per experiment_log.md §final.
+    BEAM_WIDTH=200 — 200 candidates/depth, viable at 7.6ms (reciprocal table + parallel scoring).
+    Rust beam_core: reciprocal 1/d² lookup table replaces f64 division.
+    beam_search: parallel candidate scoring via rayon (standalone path).
+    beam_search_forced: sequential scoring (called inside 9-way rayon in multi_beam).
     No direction persistence (no soft-commit, no strategic escape).
-    No short-circuit (beam search runs every frame).
     No spawn prediction (keeps things fair — no future knowledge).
-    Pure 1/r² + wall/center scoring, beam search every frame.
 
 BEAM WIDTH:
-    K=12: fast but prunes escape paths too early (paths ranked 15th at depth 2).
-    K=50: preserves escape diversity but 4× cost. Tension between speed and safety.
+    W=200: 200 candidates per depth → 1800 scored positions/step (viable at 7.6ms).
+    W=12 was the old default (1.8ms) before reciprocal table + parallel scoring.
 """
 
 # ── Movement ───────────────────────────────────────────────
@@ -36,7 +37,7 @@ HIT_Y1, HIT_Y2 = 0.0, 10.0    # 10px tall
 
 # ── Beam search parameters ─────────────────────────────────
 BEAM_DEPTH   = 40       # frames of lookahead (0.5s — distant bullets negligible, ≥10 == ≥120)
-BEAM_WIDTH   = 12       # top-K paths per depth (12 = proven optimal, experiment_log)
+BEAM_WIDTH   = 200      # top-K paths per depth (200 = viable at 7.6ms with recip+parallel)
 CHECK_EVERY  = 4        # frames per beam step (4 = proven optimal, experiment_log §final)
 
 # ── Scoring weights ────────────────────────────────────────

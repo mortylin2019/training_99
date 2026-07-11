@@ -13,29 +13,31 @@ if ! command -v cargo &>/dev/null; then
 fi
 
 MODE="${1:-release}"
-echo "Building beam_core ($MODE)..."
-[ "$MODE" = "debug" ] && cargo build || cargo build --release
+FLAG=""; [ "$MODE" = "debug" ] || FLAG="--release"
 PDIR="$MODE"; [ "$PDIR" = "debug" ] || PDIR="release"
-
-# detect source library name (differs by OS)
 SRC="target/$PDIR/"
-if [ -f "${SRC}beam_core.dll" ]; then
-  LIB="${SRC}beam_core.dll"
-elif [ -f "${SRC}libbeam_core.so" ]; then
-  LIB="${SRC}libbeam_core.so"
-elif [ -f "${SRC}libbeam_core.dylib" ]; then
-  LIB="${SRC}libbeam_core.dylib"
+
+# ── Linux (native) ──────────────────────────────────────
+echo "=== Building beam_core for Linux ($MODE) ==="
+cargo build $FLAG
+cp "${SRC}libbeam_core.so" "./beam_core.cpython-312-x86_64-linux-gnu.so"
+echo "  → beam_core.cpython-312-x86_64-linux-gnu.so"
+
+# ── Windows (cross-compile from Linux: NOT recommended) ──
+# MinGW ABI is incompatible with MSVC Python on Windows.
+# Build on Windows natively: cargo build --release
+if false && rustup target list --installed 2>/dev/null | grep -q x86_64-pc-windows-gnu; then
+  echo "=== Building beam_core for Windows ($MODE) ==="
+  cargo build $FLAG --target x86_64-pc-windows-gnu
+  cp "target/x86_64-pc-windows-gnu/$PDIR/beam_core.dll" "./beam_core.cp312-win_amd64.pyd"
+  echo "  → beam_core.cp312-win_amd64.pyd"
 else
-  echo "ERROR: cannot find built library in $SRC (expected .dll/.so/.dylib)"
-  ls "$SRC" 2>/dev/null || true
-  exit 1
+  echo "=== Skipping Windows build (target x86_64-pc-windows-gnu not installed) ==="
+  echo "  Install: rustup target add x86_64-pc-windows-gnu"
 fi
 
-SUF=$(python3 -c "import importlib.machinery; print(importlib.machinery.EXTENSION_SUFFIXES[0])")
-cp "$LIB" "./beam_core${SUF}"
-echo "beam_core${SUF} built"
-
-# smoke test
+# ── Smoke test (Linux native only) ──────────────────────
+echo "=== Smoke test ==="
 python3 -c "
 import sys; sys.path.insert(0,'.')
 import beam_core, numpy as np
@@ -43,3 +45,4 @@ d,f = beam_core.score_pos_py(100.,100., np.array([[104.,100.]]))
 assert f, 'collision detection failed'
 print('OK')
 "
+echo "=== Done ==="

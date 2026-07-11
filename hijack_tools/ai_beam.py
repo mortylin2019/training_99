@@ -72,6 +72,9 @@ class BeamAI:
         paths[:, :, 0] = bx[:, None] + vel[:, 0, None] * ts[None, :]
         paths[:, :, 1] = by[:, None] + vel[:, 1, None] * ts[None, :]
 
+        # Clamp extreme predicted positions (safety: prevents Rust recip table OOB)
+        np.clip(paths, -5000.0, 5000.0, out=paths)
+
         if not c.USE_TYPE_PREDICTION:
             return paths
 

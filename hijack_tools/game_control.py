@@ -480,6 +480,9 @@ class GameControl:
                 
             raw_vals = struct.unpack("<IIBBBBBbb", data)
             b = Bullet(*raw_vals) # Use defaults for dist
+            # Validate coordinates — some game slots contain stale/uninitialized data
+            if b.x < -500 or b.x > 1000 or b.y < -500 or b.y > 1000:
+                continue
             b.update_dist(px, py) # Calculate distance to player
             bullets.append(b)
             active_count += 1

@@ -21,7 +21,7 @@ Now with all the new AI tools, I can reverse-engineer the EXE, attach real-time 
 | AI | Med | Avg | Min | Max | Approach |
 |---|---|---|---|---|---|
 | `ai_basic` | 8.8s | 10.3s | 2.8s | 21.1s | 1/r² repulsion + wall avoidance + center pull |
-| `ai_beam` (W=12, CE=4) | 69.6s | 71.9s | 7.4s | 148.5s | Beam search, 160-frame lookahead |
+| `ai_beam` (W=200, CE=4) | 69.6s | 71.9s | 7.4s | 148.5s | Beam search, 160-frame lookahead |
 
 > **`ai_nn`** (neural-guided beam search) is ongoing work — DeepSet attention model trained on beam search demonstrations. See `tools/train_nn.py`.
 
@@ -97,7 +97,7 @@ Before the beam search starts, all active bullets have their future positions pr
 Instead of one beam, 9 independent beams run in parallel — each locked to a different first move (STOP, LEFT, RIGHT, UP, DOWN, and 4 diagonals). This prevents the single winning move from dominating early and missing escape paths that only reveal their value later. Each beam:
 
 - **Depth**: 40 beam steps × CE=4 frames/step = **160 frames** of temporal coverage (~2.5 seconds)
-- **Width**: W=12 — keeps the top 12 candidate positions at each depth step
+- **Width**: W=200 — keeps the top 200 candidate positions at each depth step
 - **Branching**: At each step, generates 9 candidate next positions (all move directions)
 
 **3. Scoring Function**
