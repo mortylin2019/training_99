@@ -124,15 +124,26 @@ class SimControl:
         pass
 
     def read_memory(self, addr, size):
-        """Read simulated memory: supports VEL_TABLE at 0x00405d74."""
+        """Read simulated memory: supports VEL_TABLE at 0x00405d74 and ACCEL_TABLE at 0x00406074."""
         import struct
-        if addr >= 0x00405d74 and addr < 0x00405d74 + 64 * 12:
-            idx = (addr - 0x00405d74) // 4
-            flat = []
-            for vx, vy in VEL_TABLE:
-                flat.extend([vx, vy])
-            vals = flat[idx:idx + size // 4]
-            return struct.pack(f'<{len(vals)}i', *vals)
+        if 0x00405d74 <= addr < 0x00405d74 + 64 * 12:
+            byte_off = addr - 0x00405d74
+            entry = byte_off // 12
+            field = (byte_off % 12) // 4  # 0=vx, 1=vy, 2=tan_ratio
+            vals = VEL_TABLE[entry % 64]
+            if size == 8 and field == 0:
+                return struct.pack('<ii', vals[0], vals[1])
+            if size == 4:
+                return struct.pack('<i', vals[field % 3])
+        if 0x00406074 <= addr < 0x00406074 + 64 * 12:
+            byte_off = addr - 0x00406074
+            entry = byte_off // 12
+            field = (byte_off % 12) // 4
+            vals = ACCEL_TABLE[entry % 64]
+            if size == 8 and field == 0:
+                return struct.pack('<ii', vals[0], vals[1])
+            if size == 4:
+                return struct.pack('<i', vals[field % 3])
         return b'\x00' * size
 
     # ── Internal ────────────────────────────────────────────────
