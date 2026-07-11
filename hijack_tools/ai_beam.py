@@ -68,6 +68,7 @@ try:
         EARLY_EXIT_ENABLED, EARLY_EXIT_BUFFER,
         PARTIAL_SORT_ENABLED, FAST_COLLISION_ENABLED,
         CENTER_PULL_ENABLED, WALL_PENALTY_ENABLED,
+        SOFT_COMMIT_ENABLED, SOFT_COMMIT_FRAMES, SOFT_COMMIT_PANIC,
     )
 except ImportError:
     from hijack_tools.algo_config import (
@@ -83,6 +84,7 @@ except ImportError:
         EARLY_EXIT_ENABLED, EARLY_EXIT_BUFFER,
         PARTIAL_SORT_ENABLED, FAST_COLLISION_ENABLED,
         CENTER_PULL_ENABLED, WALL_PENALTY_ENABLED,
+        SOFT_COMMIT_ENABLED, SOFT_COMMIT_FRAMES, SOFT_COMMIT_PANIC,
     )
 
 # Convert to numpy arrays for numba JIT
@@ -372,6 +374,8 @@ class BeamAI:
 
     def __init__(self, vel_table=None, accel_table=None):
         self.vel_table = np.array(vel_table or [(0, 0)], dtype=np.float32)
+        self._commit_counter = 0
+        self._commit_bits = 0
 
     def _velocity(self, angles):
         idx = np.clip((angles & 0x3F).astype(np.int32), 0, len(self.vel_table) - 1)
@@ -409,6 +413,20 @@ class BeamAI:
         near_wall = (px < WALL_MARGIN or px > SCR_W - WALL_MARGIN
                      or py < WALL_MARGIN or py > SCR_H - WALL_MARGIN)
         shortcut_dist2 = SHORTCUT_DISTANCE * SHORTCUT_DISTANCE
+
+        # ── Soft-commit: hold direction to reduce oscillation ──
+        if SOFT_COMMIT_ENABLED and self._commit_counter > 0:
+            panic2 = SOFT_COMMIT_PANIC * SOFT_COMMIT_PANIC
+            panic = False
+            for b in bullets:
+                if (b.x - px)**2 + (b.y - py)**2 < panic2:
+                    panic = True
+                    break
+            if not panic:
+                self._commit_counter -= 1
+                return self._commit_bits
+            # Panic release: bullet too close, replan now
+
         if SHORTCUT_ENABLED and nearest_d2 > shortcut_dist2 and not near_wall:
             # Fast repulsion: sum force vectors, pick closest discrete move
             fx = fy = 0.0
@@ -442,7 +460,12 @@ class BeamAI:
         if best <= 0:
             best = _max_gap_move(float(px), float(py),
                                  np.array([(b.x, b.y) for b in bullets], dtype=np.float64))
-        return int(BITS[max(best, 0) % len(BITS)])
+        bits = int(BITS[max(best, 0) % len(BITS)])
+        # Commit to this direction for N frames (soft-commit)
+        if SOFT_COMMIT_ENABLED:
+            self._commit_counter = SOFT_COMMIT_FRAMES
+            self._commit_bits = bits
+        return bits
 
 
 @njit

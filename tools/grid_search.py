@@ -40,12 +40,16 @@ GRID = {
 
 # Quick mode — test the most impactful axes first
 GRID_QUICK = {
-    'BEAM_WIDTH':      [20, 30, 50],
-    'BEAM_DEPTH':      [12, 20],
-    'CHECK_EVERY':     [4, 6],
-    'DANGER_BASE':     [1000, 2000],
+    'TIME_WEIGHT_RATE':  [0.0, 0.01, 0.03],
+    'TIME_WEIGHT_BASE':  [0.1, 0.5, 1.0],
+    'BEAM_WIDTH':        [30, 50, 100],
+    'BEAM_DEPTH':        [20, 40, 80],
+    'CHECK_EVERY':       [1, 2, 4],
     'SHORTCUT_DISTANCE': [120, 200],
     'CENTER_PULL_ENABLED': [True, False],
+    'SOFT_COMMIT_ENABLED': [True, False],
+    'SOFT_COMMIT_FRAMES':  [4, 8, 16],
+    'SOFT_COMMIT_PANIC':   [20, 30],
 }
 
 

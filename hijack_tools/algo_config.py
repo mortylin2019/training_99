@@ -96,3 +96,6 @@ PARTIAL_SORT_ENABLED = True    # insertion-based top-K vs np.argsort
 FAST_COLLISION_ENABLED = True  # collision-only intermediate frame check
 CENTER_PULL_ENABLED  = True    # gentle pull toward screen center (0.3 weight)
 WALL_PENALTY_ENABLED = True    # penalty for approaching screen edges
+SOFT_COMMIT_ENABLED  = True    # hold direction for N frames (reduces oscillation)
+SOFT_COMMIT_FRAMES   = 8       # frames to hold direction before replanning
+SOFT_COMMIT_PANIC    = 30      # px — release commit if bullet within this radius
