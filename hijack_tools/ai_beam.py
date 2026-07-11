@@ -98,6 +98,8 @@ _USE_EARLY_EXIT = EARLY_EXIT_ENABLED
 _EBUF = EARLY_EXIT_BUFFER
 _USE_CENTER = CENTER_PULL_ENABLED
 _USE_WALL = WALL_PENALTY_ENABLED
+_TW_BASE = TIME_WEIGHT_BASE
+_TW_RATE = TIME_WEIGHT_RATE
 
 # Compute effective margins based on toggles
 _EFF_MARGIN = SAFETY_MARGIN  # always enabled in Python beam
@@ -251,7 +253,7 @@ def _beam_search(px0, py0, paths):
                 else:
                     s, fatal = _score_pos(nx, ny, bullets_t)
                 if fatal: s += 1e9
-                w = 1.0 / (TIME_WEIGHT_BASE + t * TIME_WEIGHT_RATE)
+                w = 1.0 / (_TW_BASE + t * _TW_RATE)
                 tb = ((int(nx * 7919) ^ int(ny * 6271)) & 0xFFF) * 1e-6
                 total = beam_score[bi] + s * w + tb
 
@@ -374,6 +376,7 @@ class BeamAI:
 
     def __init__(self, vel_table=None, accel_table=None):
         self.vel_table = np.array(vel_table or [(0, 0)], dtype=np.float32)
+        self.accel_table = np.array(accel_table or [(0, 0)], dtype=np.float32)
         self._commit_counter = 0
         self._commit_bits = 0
 
@@ -382,15 +385,43 @@ class BeamAI:
         return self.vel_table[idx] / 64.0
 
     def _predict(self, bullets):
-        """Predict bullet positions over time (linear extrapolation)."""
+        """Predict bullet positions with type-aware velocity.
+
+        Type 0 (Normal):    VEL_TABLE[angle]  — constant velocity
+        Type 1 (Homing):    VEL_TABLE[angle]  — approximate (re-aims in game)
+        Type 2 (H-Accel):   vx, vy fields     — direct velocity from bullet struct
+        Type 3 (Accel):     ACCEL_TABLE[angle] — accelerating velocity
+        """
         n = len(bullets)
         T = BEAM_DEPTH * CHECK_EVERY + 1
         if n == 0:
             return np.zeros((0, T, 2), dtype=np.float64)
+
         bx = np.array([b.x for b in bullets], dtype=np.float64)
         by = np.array([b.y for b in bullets], dtype=np.float64)
+        types = np.array([b.type for b in bullets], dtype=np.int32)
         ang = np.array([b.angle_index for b in bullets], dtype=np.int32)
-        vel = self._velocity(ang)
+
+        # Default: VEL_TABLE lookup (Type 0, Type 1)
+        vel = self._velocity(ang)  # shape (n, 2), in px/frame
+
+        # Type 2: use vx, vy directly from bullet struct (internal units → px/frame)
+        t2_mask = types == 2
+        if t2_mask.any():
+            vx = np.array([b.vx for b in bullets], dtype=np.float64) / 64.0
+            vy = np.array([b.vy for b in bullets], dtype=np.float64) / 64.0
+            vel[t2_mask, 0] = vx[t2_mask]
+            vel[t2_mask, 1] = vy[t2_mask]
+
+        # Type 3: use ACCEL_TABLE (if available)
+        t3_mask = types == 3
+        if t3_mask.any() and len(self.accel_table) >= 64:
+            ang_idx = np.clip((ang[t3_mask] & 0x3F).astype(np.int32),
+                              0, len(self.accel_table) - 1)
+            accel_vel = self.accel_table[ang_idx] / 64.0  # shape (k, 2)
+            vel[t3_mask, 0] = accel_vel[:, 0]
+            vel[t3_mask, 1] = accel_vel[:, 1]
+
         ts = np.arange(T, dtype=np.float64)
         paths = np.zeros((n, T, 2), dtype=np.float64)
         paths[:, :, 0] = bx[:, None] + vel[:, 0, None] * ts[None, :]
