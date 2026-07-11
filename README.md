@@ -21,7 +21,7 @@ Now with all the new AI tools, I can reverse-engineer the EXE, attach real-time 
 | AI | Med | Avg | P25 | P75 | Approach |
 |---|---|---|---|---|---|
 | `BasicAI` | 6.8s | 6.8s | — | — | 1/r² repulsion field, no lookahead |
-| `ai_beam` (W=12, CE=4) | 41.0s | 44.9s | 19.6s | 69.5s | Beam search, 160-frame lookahead |
+| `ai_beam` (W=12, CE=4) | 38.3s | 37.0s | 25.9s | 42.5s | Beam search, 160-frame lookahead |
 | `ai_mcts` (1000iter) | 17.7s | 20.1s | 10.6s | 31.1s | Progressive widening, guided rollouts |
 | `ai_nn` (NNBoostedBeam) | 42.9s | 42.9s | — | — | NN escape-path protection + beam search |
 
