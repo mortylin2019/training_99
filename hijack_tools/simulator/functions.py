@@ -134,20 +134,20 @@ def spawn_bullet(slot_raw_x, slot_raw_y, slot_fields,
 
     if edge == 0:    # Top
         rng_state, rv = rng_next(rng_state)
-        slot_raw_x = rv % RAW_MAX_X
+        slot_raw_x = rv % SPAWN_RANGE_X
         slot_raw_y = 0
     elif edge == 1:  # Bottom
         rng_state, rv = rng_next(rng_state)
-        slot_raw_x = rv % RAW_MAX_X
+        slot_raw_x = rv % SPAWN_RANGE_X
         slot_raw_y = RAW_MAX_Y
     elif edge == 2:  # Left
         slot_raw_x = 0
         rng_state, rv = rng_next(rng_state)
-        slot_raw_y = rv % RAW_MAX_Y
+        slot_raw_y = rv % SPAWN_RANGE_Y
     else:            # Right
         slot_raw_x = RAW_MAX_X
         rng_state, rv = rng_next(rng_state)
-        slot_raw_y = rv % RAW_MAX_Y
+        slot_raw_y = rv % SPAWN_RANGE_Y
 
     info = PATTERN_INFO.get(pattern, PATTERN_INFO[0])
     slot_fields["type"] = info["type"]

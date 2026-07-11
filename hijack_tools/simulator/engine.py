@@ -66,17 +66,17 @@ class GameSimulator:
         edge = self.rng.next() & (SPAWN_EDGES - 1)
 
         if edge == 0:    # Top edge
-            b.raw_x = self.rng.next() % RAW_MAX_X
+            b.raw_x = self.rng.next() % SPAWN_RANGE_X
             b.raw_y = 0
         elif edge == 1:  # Bottom edge
-            b.raw_x = self.rng.next() % RAW_MAX_X
+            b.raw_x = self.rng.next() % SPAWN_RANGE_X
             b.raw_y = RAW_MAX_Y
         elif edge == 2:  # Left edge
             b.raw_x = 0
-            b.raw_y = self.rng.next() % RAW_MAX_Y
+            b.raw_y = self.rng.next() % SPAWN_RANGE_Y
         else:            # Right edge
             b.raw_x = RAW_MAX_X
-            b.raw_y = self.rng.next() % RAW_MAX_Y
+            b.raw_y = self.rng.next() % SPAWN_RANGE_Y
 
         info = PATTERN_INFO.get(self.pattern, PATTERN_INFO[0])
         b.type = info["type"]

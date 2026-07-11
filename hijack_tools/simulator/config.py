@@ -10,6 +10,9 @@ SCR_H = 0xE0        # 224 pixels
 # Off-screen thresholds (C: raw_x < 0x5101, raw_y < 0x3d01 for ON-screen)
 RAW_MAX_X = 0x5101
 RAW_MAX_Y = 0x3D01
+# Spawn edge ranges (C: RNG() % 0x5100, RNG() % 0x3D00 — NOT RAW_MAX)
+SPAWN_RANGE_X = 0x5100
+SPAWN_RANGE_Y = 0x3D00
 MAX_ENTITIES = 300
 MAX_BULLETS = 299       # C: DAT_00406da8 < 299
 
@@ -47,7 +50,7 @@ PATTERN_INFO = {
     4: {"type": 1, "timer": 0x10, "spread": 5},   # Homing, 16f
     5: {"type": 1, "timer": 0, "spread": 5},      # Homing, random timer
     6: {"type": 3, "timer": 0, "spread": 5},      # Accelerating
-    7: {"type": 2, "timer": 0, "spread": 0},      # H-Accel, no aiming
+    7: {"type": 2, "timer": 0, "spread": 5},      # H-Accel (fallthrough uses spread=5, per C switch default)
 }
 # Homing re-target spread (C: FUN_00402d68(ECX, 3))
 HOMING_RESPREAD = 3
