@@ -70,6 +70,7 @@ try:
         CENTER_PULL_ENABLED, WALL_PENALTY_ENABLED,
         SOFT_COMMIT_ENABLED, SOFT_COMMIT_FRAMES, SOFT_COMMIT_PANIC,
         SPAWN_PREDICT_ENABLED, SPAWN_INTERVAL_FRAMES, SPAWN_PREDICT_WEIGHT,
+        SPAWN_PREDICT_WINDOW,
     )
 except ImportError:
     from hijack_tools.algo_config import (
@@ -87,6 +88,7 @@ except ImportError:
         CENTER_PULL_ENABLED, WALL_PENALTY_ENABLED,
         SOFT_COMMIT_ENABLED, SOFT_COMMIT_FRAMES, SOFT_COMMIT_PANIC,
         SPAWN_PREDICT_ENABLED, SPAWN_INTERVAL_FRAMES, SPAWN_PREDICT_WEIGHT,
+        SPAWN_PREDICT_WINDOW,
     )
 
 # Convert to numpy arrays for numba JIT
@@ -505,7 +507,7 @@ class BeamAI:
         if SPAWN_PREDICT_ENABLED:
             f = self._frame_count
             frames_to_spawn = SPAWN_INTERVAL_FRAMES - (f % SPAWN_INTERVAL_FRAMES)
-            if frames_to_spawn < 30:
+            if frames_to_spawn < SPAWN_PREDICT_WINDOW:
                 # Check if chosen move goes toward an edge
                 idx = 0
                 for i, b in enumerate(BITS):

@@ -102,3 +102,4 @@ SOFT_COMMIT_PANIC    = 30      # px — release commit if bullet within this rad
 SPAWN_PREDICT_ENABLED = True    # anticipate bullet waves at known spawn intervals
 SPAWN_INTERVAL_FRAMES = 240     # frames between bullet spawns (3000ms at 80fps)
 SPAWN_PREDICT_WEIGHT  = 500.0   # danger added per screen edge at spawn time
+SPAWN_PREDICT_WINDOW  = 15      # frames before spawn to start avoiding edges
