@@ -36,8 +36,8 @@ HIT_X1, HIT_X2 = 2.0, 13.0    # 11px wide
 HIT_Y1, HIT_Y2 = 0.0, 10.0    # 10px tall
 
 # ── Beam search parameters ─────────────────────────────────
-BEAM_DEPTH   = 40       # frames of lookahead (0.5s — distant bullets negligible, ≥10 == ≥120)
-BEAM_WIDTH   = 200      # top-K paths per depth (200 = viable at 7.6ms with recip+parallel)
+BEAM_DEPTH   = 40       # frames of lookahead (0.5s — distant bullets negligible)
+BEAM_WIDTH   = 25       # top-K paths per depth (25 = 8.9ms on Windows, 50=11.4ms)
 CHECK_EVERY  = 4        # frames per beam step (4 = proven optimal, experiment_log §final)
 
 # ── Scoring weights ────────────────────────────────────────
@@ -69,7 +69,7 @@ MCTS_TAU_START       = 5.0      # annealing start temperature (exploration)
 MCTS_TAU_END         = 0.5      # annealing end temperature (exploitation)
 MCTS_VERIFY_TAU      = 0.3      # low temperature for candidate verification rollouts
 # ── Scoring toggles ────────────────────────────────────────
-MULTI_BEAM_ENABLED   = True     # 9 parallel beams, each locked to different first move
+MULTI_BEAM_ENABLED   = False    # False = beam_search (faster, internal rayon). True = 9-way multi_beam.
 EARLY_EXIT_ENABLED  = True     # stop bullet loop when candidate can't win
 EARLY_EXIT_BUFFER   = 50000    # safety margin for early exit (max bullet danger)
 PARTIAL_SORT_ENABLED = True    # insertion-based top-K vs np.argsort
