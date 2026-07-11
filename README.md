@@ -18,12 +18,11 @@ Now with all the new AI tools, I can reverse-engineer the EXE, attach real-time 
 
 ## AI Performance (Simulator, Normal Difficulty, 30 runs)
 
-| AI | Med | Avg | P25 | P75 | Approach |
+| AI | Med | Avg | Min | Max | Approach |
 |---|---|---|---|---|---|
-| `BasicAI` | 6.8s | 6.8s | — | — | 1/r² repulsion field, no lookahead |
-| `ai_beam` (W=12, CE=4) | 38.3s | 37.0s | 25.9s | 42.5s | Beam search, 160-frame lookahead |
-| `ai_mcts` (1000iter) | 17.7s | 20.1s | 10.6s | 31.1s | Progressive widening, guided rollouts |
-| `ai_nn` (NNBoostedBeam) | 42.9s | 42.9s | — | — | NN escape-path protection + beam search |
+| `ai_basic` | 5.2s | 5.2s | 2.3s | 10.0s | 1/r² repulsion field, no lookahead |
+| `ai_beam` (W=12, CE=4) | 69.6s | 71.9s | 7.4s | 148.5s | Beam search, 160-frame lookahead |
+| `ai_mcts` (1000iter) | 22.3s | 24.4s | 2.4s | 53.6s | Progressive widening, guided rollouts |
 
 ## Quick Start
 
@@ -37,7 +36,7 @@ Available AIs: `ai_basic`, `ai_beam`, `ai_mcts`, `ai_nn`, `ai_nn_greedy`
 
 ### Compare AIs
 ```bash
-python tools/bench_compare.py --runs 10 --ai ai_beam,ai_mcts
+python tools/bench_compare.py --runs 10 --ai ai_basic,ai_beam,ai_mcts
 ```
 
 ### Live Game (Windows only, requires `raw/99.exe`)

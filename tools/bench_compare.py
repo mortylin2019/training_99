@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-tools/bench_compare.py — Compare beam search vs MCTS on the simulator.
-Run: python tools/bench_compare.py [--runs 30] [--ai ai_beam,ai_mcts]
+tools/bench_compare.py — Compare AIs on the simulator.
+Run: python tools/bench_compare.py [--runs 30] [--ai ai_basic,ai_beam,ai_mcts]
 """
 import sys, argparse, time, os, numpy as np
 sys.path.insert(0, ".")
@@ -13,6 +13,7 @@ if os.path.isdir(_BEAM_CORE_DIR) and _BEAM_CORE_DIR not in sys.path:
 
 from hijack_tools.simulator.engine import GameSimulator
 from hijack_tools.simulator.tables import VEL_TABLE
+from ai_basic import BasicAI
 from ai_beam import BeamAI
 from ai_mcts import MctSAI
 import hijack_tools.algo_config as cfg
@@ -28,7 +29,7 @@ def run_one(ai_cls, difficulty, seed, max_frames=40000):
         if not alive:
             break
     from hijack_tools.simulator.config import FPS as SIM_FPS
-return sim.frame / SIM_FPS
+    return sim.frame / SIM_FPS
 
 
 def main():
@@ -36,14 +37,18 @@ def main():
     p.add_argument("--runs", type=int, default=10)
     p.add_argument("--difficulty", type=int, default=1, choices=[0, 1, 2, 3],
                    help="0=Easy, 1=Normal, 2=Hard, 3=Lunatic")
-    p.add_argument("--ai", default="ai_beam,ai_mcts")
+    p.add_argument("--ai", default="ai_basic,ai_beam,ai_mcts")
     p.add_argument("--max-frames", type=int, default=40000)
     args = p.parse_args()
 
     ai_names = [a.strip() for a in args.ai.split(",")]
     diff_name = {0: "Easy", 1: "Normal", 2: "Hard", 3: "Lunatic"}[args.difficulty]
 
-    ai_map = {"ai_beam": ("beam W=12", BeamAI), "ai_mcts": ("MCTS 1000iter", MctSAI)}
+    ai_map = {
+        "ai_basic": ("BasicAI 1/r²", BasicAI),
+        "ai_beam": ("beam W=12 CE=4", BeamAI),
+        "ai_mcts": ("MCTS 1000iter", MctSAI),
+    }
 
     print(f"=== {diff_name} difficulty, {args.runs} runs each ===")
     for name in ai_names:
