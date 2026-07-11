@@ -24,16 +24,20 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'hijack_tools')
 # Edit this to search different parameter ranges.
 # Each combo = cartesian product of all values.
 GRID = {
-    'BEAM_WIDTH':      [30, 40, 50, 60],
-    'BEAM_DEPTH':      [16, 20, 24],
-    'SHORTCUT_DISTANCE': [120, 160, 200, 0],  # 0 = disable shortcut
-    'EARLY_EXIT_BUFFER': [10000, 50000, 100000],
+    'BEAM_WIDTH':      [30, 40, 50],
+    'BEAM_DEPTH':      [16, 20],
+    'CHECK_EVERY':     [4, 5],
+    'SHORTCUT_DISTANCE': [120, 200, 0],   # 0 = disable shortcut
+    'EARLY_EXIT_BUFFER': [10000, 50000],
+    'EARLY_EXIT_ENABLED': [True, False],
+    'PARTIAL_SORT_ENABLED': [True],
 }
 
-# Quick mode overrides (fewer values)
+# Quick mode — fewer combos
 GRID_QUICK = {
     'BEAM_WIDTH':      [30, 50],
-    'BEAM_DEPTH':      [16, 20],
+    'BEAM_DEPTH':      [20],
+    'CHECK_EVERY':     [4],
     'SHORTCUT_DISTANCE': [120, 200],
     'EARLY_EXIT_BUFFER': [10000, 50000],
 }
@@ -117,7 +121,7 @@ def grid_search(ai_name, grid, seeds, difficulty, max_frames, workers):
     for values in itertools.product(*grid.values()):
         combo = dict(zip(keys, values))
         for seed in range(seeds):
-            combos.append((ai_name, combo, difficulty, max_frames, seed * 12345 + hash(str(combo)) % 10000))
+            combos.append((ai_name, combo, difficulty, max_frames, seed * 12345))
 
     print(f"Grid: {len(grid)} params, {len(combos)} total runs "
           f"({len(combos)//seeds} combos × {seeds} seeds)")
