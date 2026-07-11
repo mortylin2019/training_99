@@ -486,8 +486,32 @@ class BeamAI:
                     best_dot, best_idx = dot, mi
             return int(BITS[best_idx])
 
+        # ── Spawn prediction: inject phantom edge bullets before beam search ──
+        self._frame_count += 1
+        predict_bullets = bullets
+        phantom_bullets = []
+        if SPAWN_PREDICT_ENABLED:
+            f = self._frame_count
+            frames_to_spawn = SPAWN_INTERVAL_FRAMES - (f % SPAWN_INTERVAL_FRAMES)
+            if frames_to_spawn < SPAWN_PREDICT_WINDOW:
+                # Phantom stationary bullets at screen edges (Type 2, vx=vy=0)
+                # Beam naturally avoids edges because these contribute danger
+                class _Phantom:
+                    __slots__ = ('x', 'y', 'type', 'angle_index', 'vx', 'vy')
+                    def __init__(self, x, y):
+                        self.x = x; self.y = y; self.type = 2
+                        self.angle_index = 0; self.vx = 0; self.vy = 0
+                edges = [
+                    (SCR_W // 2, 0),          # top center
+                    (SCR_W // 2, SCR_H),      # bottom center
+                    (0, SCR_H // 2),          # left center
+                    (SCR_W, SCR_H // 2),      # right center
+                ]
+                phantom_bullets = [_Phantom(x, y) for x, y in edges]
+                predict_bullets = list(bullets) + phantom_bullets
+
         # ── Beam search
-        paths = self._predict(bullets)
+        paths = self._predict(predict_bullets)
         if USE_MC_SEARCH:
             best = int(_mc_search(float(px), float(py), paths))
         else:
@@ -501,44 +525,6 @@ class BeamAI:
         if SOFT_COMMIT_ENABLED:
             self._commit_counter = SOFT_COMMIT_FRAMES
             self._commit_bits = bits
-
-        # ── Spawn prediction: avoid edges near spawn intervals ──
-        self._frame_count += 1
-        if SPAWN_PREDICT_ENABLED:
-            f = self._frame_count
-            frames_to_spawn = SPAWN_INTERVAL_FRAMES - (f % SPAWN_INTERVAL_FRAMES)
-            if frames_to_spawn < SPAWN_PREDICT_WINDOW:
-                # Check if chosen move goes toward an edge
-                idx = 0
-                for i, b in enumerate(BITS):
-                    if b == bits:
-                        idx = i
-                        break
-                dx = MOVES[idx, 0]; dy = MOVES[idx, 1]
-                nx = px + dx; ny = py + dy
-                margin = WALL_MARGIN
-                if (nx < margin or nx > SCR_W - margin
-                        or ny < margin or ny > SCR_H - margin):
-                    # Override: move toward center instead
-                    cx = 0.0; cy = 0.0
-                    if px < CTR_X: cx = 1.0
-                    elif px > CTR_X: cx = -1.0
-                    if py < CTR_Y: cy = 1.0
-                    elif py > CTR_Y: cy = -1.0
-                    # Find closest discrete move to center direction
-                    best_dot = -float('inf')
-                    for mi in range(9):
-                        mdx, mdy = MOVES[mi]
-                        if mdx == 0 and mdy == 0: continue
-                        mmag = (mdx*mdx + mdy*mdy)**0.5
-                        vmag = max(abs(cx)+abs(cy), 0.001)
-                        dot = (mdx*cx + mdy*cy) / (mmag * vmag)
-                        if dot > best_dot:
-                            best_dot = dot
-                            bits = int(BITS[mi])
-                    if SOFT_COMMIT_ENABLED:
-                        self._commit_bits = bits
-
         return bits
 
 
