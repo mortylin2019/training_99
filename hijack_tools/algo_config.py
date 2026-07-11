@@ -66,9 +66,9 @@ HIT_Y1, HIT_Y2 = 0.0, 10.0    # 10px tall
 #
 # Python path (no C DLL): CHECK_EVERY=4, DEPTH=40
 # C engine path:          CHECK_EVERY=1, DEPTH=160
-BEAM_DEPTH   = 80       # 80 frames lookahead at CHECK_EVERY=4
-BEAM_WIDTH   = 50  # wide beam preserves escape paths       # wider beam preserves escape paths through early pruning
-CHECK_EVERY  = 1        # frames per beam step
+BEAM_DEPTH   = 40       # 160 frames lookahead at CHECK_EVERY=4
+BEAM_WIDTH   = 12       # top-K paths (proven optimal in experiment log)
+CHECK_EVERY  = 4        # frames per beam step (proven: coarser = smoother)
 
 # ── Scoring weights ────────────────────────────────────────
 COLLISION_VAL = 1e8          # fatal: in hitbox = instant discard
